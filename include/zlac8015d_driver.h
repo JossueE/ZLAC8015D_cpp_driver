@@ -4,9 +4,12 @@
 #include <iostream>
 #include <cerrno>
 #include <cmath>
+#include <utility>
 #include <string>
 #include <algorithm>
 #include <optional>
+#include <sstream>
+#include <iomanip>
 
 #define M_PI 3.14159265358979323846
 #define counts_per_rad (4096 / (2 * M_PI)) // Assuming 4096 counts per revolution
@@ -57,10 +60,11 @@
 
 // ------------------------------------ Troubleshooting ------------------------------------ 
 
-#define FAULTS 0x20A5 // <- High 16 bits = Left and Low 16 bits = Right
+#define FAULTS_LEFT 0x20A5 // <- High 16 bits = Left and Low 16 bits = Right
+#define FAULTS_RIGHT 0x20A6 // <- High 16 bits = Left and Low 16 bits = Right
 #define READ_ACTUAL_RPM  0x20AB // <- Left and Right
 #define READ_ACTUAL_CURRENT 0x20AD // <- Unit = A
-#define READ_ACTUAL_SOFTWARE_SERVER 0x20A0
+#define READ_ACTUAL_SOFTWARE_VERSION 0x20A0 // <- Provided by the manufacturer, can be used to check if the driver is correctly reading registers
 #define READ_TEMPERATURE 0x20A4 // <- High 8 bits = Left and Low 8 bits = Right --- Unit = °C
 
 // ------------------------------------ Control Command ------------------------------------ 
@@ -122,6 +126,7 @@ public:
 	int disable_motor();
     int enable_motor();
 	int change_mode(std::optional<std::string> mode = std::nullopt);
+	int reset_alarm();
 
 	// Encoder
 	std::pair<int32_t, int32_t> get_encoder_count();
@@ -147,11 +152,12 @@ public:
 	std::pair<int, int> get_current();
 
 	// Error and troubleshooting
-	int get_fault_code(int16_t res[2]);
+	std::pair<std::string, std::string> get_error();
+	std::string decode_error(uint16_t reg, const char* side);
+	std::pair<int, int> get_temperature();
+	std::string get_software_version();
 
-
-
-
+	
 
 	// ########## Under Evaluation ##########
 	int set_decel_time(uint16_t L_ms, uint16_t R_ms);
@@ -165,8 +171,10 @@ private:
 	std::string mode_;
     int baudrate_;
     modbus_t* client_ = nullptr;
+
 	int set_mode();
 	static bool is_valid_mode(const std::string& m);
+	std::string hex16(uint16_t v); 
 	
 
 };

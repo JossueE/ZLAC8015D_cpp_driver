@@ -117,6 +117,17 @@ int ZLAC8015D::enable_motor(){
   return modbus_write_register(client_, CONTROL_REG, ENABLE);
 }
 
+int ZLAC8015D::reset_alarm(){
+
+  /**
+  * @brief Clear the alarm if there is any active.
+  * @return -1 if no active connection, or if the alarm clear command fails; 0 on success.
+  */
+
+  if (!client_) return -1;
+  return modbus_write_register(client_, CONTROL_REG, ALRM_CLR);
+}
+
 int ZLAC8015D::change_mode(std::optional<std::string> mode) {
 
   /**
@@ -529,20 +540,177 @@ int ZLAC8015D::set_sync_position(float L_rad, float R_rad){
 }
 
 
+std::pair<std::string, std::string> ZLAC8015D::get_error() {
+  if (!client_) return {"Not connected", "Not connected"};
+
+  uint16_t error_left{0};
+  uint16_t error_right{0};
+
+  if (modbus_read_registers(client_, FAULTS_LEFT, 1, &error_left) == -1) {
+    return {std::string("Failed to read left error register: ") + modbus_strerror(errno),
+            "Right: not read"};
+  }
+
+  if (modbus_read_registers(client_, FAULTS_RIGHT, 1, &error_right) == -1) {
+    return {"Left: read ok",
+            std::string("Failed to read right error register: ") + modbus_strerror(errno)};
+  }
+
+  return {hex16(error_left), hex16(error_right)};
+}
+
+std::string ZLAC8015D::decode_error(uint16_t reg, const char* side){
+
+  if (!client_) return "Not connected";
+  if (reg == 0) {
+    return std::string(side) + ": No error. Driver is working properly.";
+  }
+
+  std::ostringstream out;
+  out << side << ": Active faults (0x"
+      << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << reg
+      << std::dec << ")\n";
+
+  uint16_t known_mask = 0;
+
+  for (uint16_t bit = 1; bit != 0; bit <<= 1) {
+    if (!(reg & bit)) continue;
+
+    known_mask |= bit;
+
+    switch (bit) {
+      case 0x0001:
+        out << "\n- Over Voltage Error:\n"
+                "  - Power supply voltage is too high.\n"
+                "  - Excessive back EMF (consider bleeder circuit)\n";
+        break;
+
+      case 0x0002:
+        out << "\n- Under Voltage Error:\n"
+                "  - Power supply voltage is too low.\n"
+                "  - Check wiring connector.\n"
+                "  - Check motor parameters.\n";
+        break;
+
+      case 0x0004:
+        out << "\n- Motor Overcurrent Fault:\n"
+                "  - Instantaneous current is too high.\n"
+                "  - Motor power cable is loose.\n";
+        break;
+
+      case 0x0008:
+        out << "\n- Motor Overload Fault:\n"
+                "  - Check if the motor cable is loose.\n"
+                "  - Check wiring and motor parameters.\n"
+                "  - Motor is stall.\n"
+                "  - Motor or driver problem.\n";
+        break;
+
+      case 0x0020:
+        out << "\n- Encoder Value out of Tolerance:\n"
+                "  - Motor is stall.\n"
+                "  - Encoder problem.\n";
+        break;
+
+      case 0x0080:
+        out << "\n- Reference Voltage Error:\n"
+                "  - Reference voltage circuit issue.\n";
+        break;
+
+      case 0x0100:
+        out << "\n- EEPROM Read/Write Error:\n"
+                "  - Firmware upgraded (needs factory settings).\n"
+                "  - EEPROM circuit damaged.\n";
+        break;
+
+      case 0x0200:
+        out << "\n- Hall Error:\n"
+                "  - Check motor cable.\n"
+                "  - Motor problem.\n"
+                "  - Driver problem.\n";
+        break;
+
+      case 0x0400:
+        out << "\n- Temperature too High:\n"
+                "  - Motor current too high (monitor and reduce current).\n"
+                "  - Motor thermistor damaged.\n"
+                "  - Driver circuit damaged.\n";
+        break;
+
+      case 0x0800:
+        out << "\n- Encoder Error:\n"
+                "  - Check encoder cable.\n"
+                "  - Check if encoder cable is disconnected.\n";
+        break;
+
+      case 0x2000:
+        out << "\n- Speed Setting Error:\n"
+                "  - Given speed exceeds rated speed.\n";
+        break;
+
+      default:
+        // Si hay bits que tu manual no documenta o aún no mapeaste
+        out << "\n- Unknown fault bit set: 0x"
+            << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << bit
+            << std::dec << "\n";
+        break;
+    }
+  }
+
+  uint16_t unknown = reg & ~known_mask;
+  if (unknown) {
+    out << "\n- Unmapped bits present: 0x"
+        << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << unknown
+        << std::dec << "\n";
+  }
+
+  return out.str();
+};
+
+std::string ZLAC8015D::hex16(uint16_t v) {
+  std::ostringstream oss;
+  oss << "0x"
+      << std::hex << std::uppercase
+      << std::setw(4) << std::setfill('0')
+      << v;
+  return oss.str();
+}
 
 
+std::pair<int, int> ZLAC8015D::get_temperature() {
 
+  /**
+   * @brief Read left and right motor temperature in Celsius.
+   * @return temp_left and temp_right in °C on success, -1 on error (not connected, Modbus failure).
+   */
 
+  if (!client_) return {-1, -1};
+  uint16_t temp;
+  int rc = modbus_read_registers(client_, READ_TEMPERATURE, 1, &temp);
+  if (rc == -1) {
+    std::cerr << "get_temperature failed: " << modbus_strerror(errno) << std::endl;
+    return {-1, -1};
+  }
+  std::cout << "Current Temperature: Left: " << (temp >> 8) << " °C Right: " << (temp & 0xFF) << " °C" << std::endl;
+  return { static_cast<int>(temp >> 8), static_cast<int>(temp & 0xFF) };
+}
+  
+std::string ZLAC8015D::get_software_version(){
+    /**
+   * @brief Read the driver software version.
+   * @return version number on success, -1 on error (not connected, Modbus failure).
+   */
 
-
-
-
-
-
-
-
-
-
+  if (!client_) return "Not connected";
+  uint16_t version;
+  int rc = modbus_read_registers(client_, READ_ACTUAL_SOFTWARE_VERSION, 1, &version);
+  if (rc == -1) {
+    std::cerr << "get_software_version failed: " << modbus_strerror(errno) << std::endl;
+    return "Not connected";
+  }
+  std::cout << "Driver Software Version: " << hex16(version) << std::endl;
+  return hex16(version);
+}
 
 
 
