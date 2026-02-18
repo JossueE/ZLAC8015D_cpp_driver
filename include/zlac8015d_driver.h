@@ -18,12 +18,21 @@
 
 #define CONTROL_REG 0x200E
 #define OPR_MODE  0x200D
+#define SAVE_EEPROM 0x2010
+
+// ----------------------------------- For Internal Ramps -----------------------------------
+
 #define L_ACL_TIME  0x2080
 #define R_ACL_TIME  0x2081
+
 #define L_DCL_TIME  0x2082
 #define R_DCL_TIME  0x2083
 
 // ----------------------------------- For Velocity Mode ----------------------------------- 
+
+#define SET_SPEED_RESOLUTION 0x2022
+#define RPM_RES_CERO_POINT_ONE 0x000A
+#define RPM_RES_ONE 0x0001
 
 #define SET_RPM  0x2088
 #define GET_RPM  0x20AB
@@ -33,6 +42,14 @@
 #define SET_POS  0x208A  // 0x208A (high) 0x208B (low) = Left, 0x208C (high) 0x208D (low) = Right
 #define L_MAX_RPM_POS  0x208E
 #define R_MAX_RPM_POS  0x208F
+
+// ----------------------- For Torque Mode - Absolute and Relative ----------------------- 
+
+#define SET_TORQUE 0x2090
+
+// ------------------------------------- Parking Mode --------------------------------------
+
+#define PARKING_MODE_REG 0x200C
 
 // ---------------------------------------- Encoder ---------------------------------------- 
 #define ENC_LEFT  0x20A7
@@ -62,8 +79,8 @@
 
 #define FAULTS_LEFT 0x20A5 // <- High 16 bits = Left and Low 16 bits = Right
 #define FAULTS_RIGHT 0x20A6 // <- High 16 bits = Left and Low 16 bits = Right
-#define READ_ACTUAL_RPM  0x20AB // <- Left and Right
-#define READ_ACTUAL_CURRENT 0x20AD // <- Unit = A
+#define READ_ACTUAL_RPM  0x20AB // <- Left and Right motors actual RPM (unit: RPM)
+#define READ_ACTUAL_CURRENT 0x20AD // <- Left and Right motors actual Current (unit: A)
 #define READ_ACTUAL_SOFTWARE_VERSION 0x20A0 // <- Provided by the manufacturer, can be used to check if the driver is correctly reading registers
 #define READ_TEMPERATURE 0x20A4 // <- High 8 bits = Left and Low 8 bits = Right --- Unit = °C
 
@@ -107,6 +124,8 @@ struct PositionMotorGains { int16_t kp, kf; };
 struct VelocityGains { VelocityMotorGains left, right; };
 struct PositionGains { PositionMotorGains left, right; };
 
+enum class SpeedRes { RPM_1, RPM_0_1 };
+
 class ZLAC8015D
 {
 public:
@@ -137,10 +156,11 @@ public:
 	int set_control_gains_velocity(VelocityGains &gains);
 	int set_control_gains_position(PositionGains &gains);
 	
-
 	// For Velocity Mode
-	int set_rpm(int16_t L_rpm, int16_t R_rpm); 
-	std::pair<int, int> get_rpm();
+	int set_speed_resolution(SpeedRes res);
+	std::string get_speed_resolution();
+	int set_sync_rpm(int16_t L_rpm, int16_t R_rpm); 
+	std::pair<float, float> get_rpm();
 
 	// For relative_position and absolute_position Mode
 	int set_max_speed_position_mode(int16_t L_rpm, int16_t R_rpm);
@@ -148,8 +168,12 @@ public:
 	int set_sync_position(float L_rad, float R_rad);
 
 	// For Torque Mode
-	int set_current(int16_t L_mA, int16_t R_mA);
-	std::pair<int, int> get_current();
+	int set_sync_current(int16_t L_mA, int16_t R_mA);
+	std::pair<float, float> get_current();
+
+	// Parking Mode
+	int enable_parking_mode();
+	int disable_parking_mode();
 
 	// Error and troubleshooting
 	std::pair<std::string, std::string> get_error();
@@ -157,11 +181,9 @@ public:
 	std::pair<int, int> get_temperature();
 	std::string get_software_version();
 
-	
-
-	// ########## Under Evaluation ##########
-	int set_decel_time(uint16_t L_ms, uint16_t R_ms);
-	int set_accel_time(uint16_t L_ms, uint16_t R_ms);
+	// Internal ramps
+	int set_decel_time(uint16_t decel_time_ms);
+	int set_accel_time(uint16_t accel_time_ms);
 	
 	
 

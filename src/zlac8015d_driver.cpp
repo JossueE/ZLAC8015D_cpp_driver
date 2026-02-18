@@ -360,52 +360,106 @@ int ZLAC8015D::set_control_gains_position(PositionGains &gains){
 
 
 // For velocity mode
-int ZLAC8015D::set_rpm(int16_t L_rpm, int16_t R_rpm){
 
+int ZLAC8015D::set_speed_resolution(SpeedRes res) {
+  
   /**
-   * @brief Sets target wheel speeds (RPM) for left and right motors in velocity mode.
-   *
-   * Ensures the driver is in "velocity" mode (switches if needed), clamps the input
-   * RPM commands to [-max_rpm, max_rpm], then writes both setpoints to the target RPM
-   * registers using a single Modbus multi-write transaction.
-   *
-   * @param L_rpm Target left motor speed in RPM (negative = reverse).
-   * @param R_rpm Target right motor speed in RPM (negative = reverse).
+   * @brief Set the speed resolution for velocity mode.
+   * @param res SpeedRes::RPM_1 for 1 RPM resolution, SpeedRes::RPM_0_1 for 0.1 RPM resolution.
    * @return 0 on success, -1 on error (not connected, Modbus failure).
    */
 
   if (!client_) return -1;
-  if(mode_ != "velocity") {
-    std::cout << "To set RPM you have to be in velocity mode and you are in" << mode_ << std::endl;
-    std::cout << "For security we change your mode to Velocity" << std::endl;
-    change_mode("velocity");
-  }
+    const uint16_t val = (res == SpeedRes::RPM_0_1) ? RPM_RES_CERO_POINT_ONE : RPM_RES_ONE; // A=0.1RPM, 1=1RPM
 
-  if(L_rpm < -100 || L_rpm > 100 || R_rpm < -100 || R_rpm > 100) {
-    std::cerr << "RPM must be between -100 and 100\n";
-    L_rpm = std::clamp<int16_t>(L_rpm, -100, 100);
-    R_rpm = std::clamp<int16_t>(R_rpm, -100, 100);
-    std::cout << "For security we set the max speed for position mode to: " << L_rpm << " for left and " << R_rpm << " for right\n";
-  }
+  if (modbus_write_register(client_, SET_SPEED_RESOLUTION, val) == -1) return -1; 
+  if (modbus_write_register(client_, SAVE_EEPROM, 0x0001) == -1) return -1; 
 
-  uint16_t regs[2] = {
-    static_cast<uint16_t>(L_rpm),
-    static_cast<uint16_t>(R_rpm)
-  };
+  std::cout << "Successfully set speed resolution to " << ((res == SpeedRes::RPM_0_1) ? "0.1 RPM" : "1 RPM") << std::endl;
+  std::cout << "Remember to Restart the system to make effective the changes\n";
 
-  int rc = modbus_write_registers(client_, SET_RPM, 2, regs);
-  if (rc == -1) {
-    std::cerr << "set_rpm failed: " << modbus_strerror(errno) << std::endl;
-    return -1;
-  }
+
   return 0;
 }
 
-std::pair<int, int> ZLAC8015D::get_rpm(){
+std::string ZLAC8015D::get_speed_resolution() {
+
+  /**
+   * @brief Get the current speed resolution for velocity mode.
+   * @return "0.1 RPM" or "1 RPM" on success, empty string on error (not connected, Modbus failure).
+   */
+
+  if (!client_) return "Unknown";
+  uint16_t val;
+  if (modbus_read_registers(client_, SET_SPEED_RESOLUTION, 1, &val) != 1) {
+    std::cerr << "get_speed_resolution failed: " << modbus_strerror(errno) << std::endl;
+    return "Unknown";
+  }
+
+  std::string res_str = (val == RPM_RES_CERO_POINT_ONE) ? "0.1 RPM" : (val == RPM_RES_ONE) ? "1 RPM" : "Unknown";
+  std::cout << "Current speed resolution: " << res_str << std::endl;
+  return res_str;
+}
+
+
+int ZLAC8015D::set_sync_rpm(int16_t L_rpm, int16_t R_rpm) {
+  if (!client_) return -1;
+
+  if (mode_ != "velocity") {
+    std::cout << "To set RPM you have to be in velocity mode and you are in " << mode_ << "\n";
+    std::cout << "For security we change your mode to Velocity\n";
+    if (change_mode("velocity") != 0) return -1; 
+  }
+
+  std::string res = get_speed_resolution();
+  if (res == "Unknown") {
+    std::cerr
+      << "Failed to get speed resolution\n"
+      << " - Remember to set the speed resolution before setting the RPM\n"
+      << " - And restart the system to make effective the changes\n";
+    return -1;
+  }
+
+  if (L_rpm < -1000 || L_rpm > 1000 || R_rpm < -1000 || R_rpm > 1000) {
+    std::cerr << "RPM must be between -1000 and 1000\n";
+    L_rpm = std::clamp<int16_t>(L_rpm, -1000, 1000);
+    R_rpm = std::clamp<int16_t>(R_rpm, -1000, 1000);
+  }
+
+  uint16_t regs[2]{0, 0};
+
+  if (res == "1 RPM") {
+    regs[0] = static_cast<uint16_t>(static_cast<int16_t>(L_rpm));
+    regs[1] = static_cast<uint16_t>(static_cast<int16_t>(R_rpm));
+  } else if (res == "0.1 RPM") {
+    int32_t l_units = static_cast<int32_t>(L_rpm);
+    int32_t r_units = static_cast<int32_t>(R_rpm);
+
+    l_units = std::clamp<int32_t>(l_units, -32768, 32767);
+    r_units = std::clamp<int32_t>(r_units, -32768, 32767);
+
+    regs[0] = static_cast<uint16_t>(static_cast<int16_t>(l_units));
+    regs[1] = static_cast<uint16_t>(static_cast<int16_t>(r_units));
+  } else {
+    std::cerr << "Unknown speed resolution string: " << res << "\n";
+    return -1;
+  }
+
+  int rc = modbus_write_registers(client_, SET_RPM, 2, regs); // SET_RPM debe ser 0x2088
+  if (rc == -1) {
+    std::cerr << "set_sync_rpm failed: " << modbus_strerror(errno) << "\n";
+    return -1;
+  }
+
+  return 0;
+}
+
+
+std::pair<float, float> ZLAC8015D::get_rpm(){
 
   /**
    * @brief Read left and right motor actual speed
-   * @return rpm_left and rmp_right on success, -1 on error (not connected, Modbus failure).
+   * @return rpm_left and rmp_right on success (unit: RPM), -1 on error (not connected, Modbus failure).
    */
 
   if (!client_) return {-1, -1};
@@ -415,8 +469,8 @@ std::pair<int, int> ZLAC8015D::get_rpm(){
     std::cerr << "get_rpm failed: " << modbus_strerror(errno) << std::endl;
     return {-1, -1};
   }
-  std::cout << "Current RPM: Left: " << rpm[0] << " Right: " << rpm[1] << std::endl;
-  return { static_cast<int>(rpm[0]), static_cast<int>(rpm[1]) };
+  std::cout << "Current RPM: Left: " << rpm[0] * 0.1f << " Right: " << rpm[1] * 0.1f << std::endl;
+  return { static_cast<float>(rpm[0]) * 0.1f, static_cast<float>(rpm[1]) * 0.1f };
 }
 
 // For relative position mode
@@ -511,7 +565,7 @@ int ZLAC8015D::set_sync_position(float L_rad, float R_rad){
     std::cerr << "Failed to get max speed for position mode, cannot set relative position\n";
   }
 
-  if (max_rpm_L > 50 || max_rpm_R > 50) {
+  if (max_rpm_L > 50 || max_rpm_R > 50 || max_rpm_L <= 0 || max_rpm_R <= 0) {
     if(set_max_speed_position_mode(50, 50) == 0){
       std::cout << "FOR SECURITY: Set default max speed for position mode to 50 RPM for both motors\n";
     }
@@ -539,6 +593,82 @@ int ZLAC8015D::set_sync_position(float L_rad, float R_rad){
   return (rc == 4) ? 0 : -1;
 }
 
+int ZLAC8015D::set_sync_current(int16_t L_mA, int16_t R_mA){
+
+  /**
+   * @brief Sends a synchronized current command to both motors.
+   *
+   * Requires the driver to be in "current" mode; if not, it switches to current
+   * mode for safety. Writes the target currents for left and right motors (2 registers
+   * starting at SET_CURRENT), then triggers a synchronized current start via CONTROL_REG (CURR_SYNC).
+   *
+   * @param L_mA Target left current in milliamps.
+   * @param R_mA Target right current in milliamps.
+   * @return 0 on success, -1 on error (not connected, Modbus failure, or partial write).
+   */
+
+  if (!client_) return -1;
+  if(mode_ != "torque") {
+    std::cout << "To set torque you have to be in torque mode and you are in " << mode_ << std::endl;
+    std::cout << "For security we change your mode to torque" << std::endl;
+    change_mode("torque");
+  }
+
+  if (L_mA < -2000 || L_mA > 2000 || R_mA < -2000 || R_mA > 2000) {
+    std::cerr << "Current must be between -2000 mA and 2000 mA\n";
+    L_mA = std::clamp<int16_t>(L_mA, -2000, 2000);
+    R_mA = std::clamp<int16_t>(R_mA, -2000, 2000);
+    std::cout << "For security we set the max current for torque mode to: " << L_mA << " mA for left and " << R_mA << " mA for right\n";
+  }
+
+  uint16_t regs[2] = {
+    static_cast<uint16_t>(L_mA),
+    static_cast<uint16_t>(R_mA)
+  };
+
+  int rc = modbus_write_registers(client_, SET_TORQUE, 2, regs);
+  return (rc == 2) ? 0 : -1;
+}
+
+std::pair<float, float> ZLAC8015D::get_current(){
+  /**
+   * @brief Read left and right motor actual current
+   * @return current_left and current_right on success (unit: A), -1 on error (not connected, Modbus failure).
+   */
+  if (!client_) return {-1, -1};
+  uint16_t current[2];
+  int rc = modbus_read_registers(client_, READ_ACTUAL_CURRENT, 2, current);
+  if (rc == -1) {
+    std::cerr << "get_current failed: " << modbus_strerror(errno) << std::endl;
+    return {-1, -1};
+  }
+  std::cout << "Current actual mA: Left: " << current[0] * 0.1f << " Right: " << current[1] * 0.1f << std::endl;
+  return { static_cast<float>(current[0]) * 0.1f, static_cast<float>(current[1]) * 0.1f };
+}
+
+
+int ZLAC8015D::enable_parking_mode(){
+
+  /**
+   * @brief Enable parking mode, limit the current of the motor to 3A and this function to prevent the motor from over
+temperature problem.
+   * @return 0 on success, -1 on error (not connected, Modbus failure).
+   */
+
+  if (!client_) return -1;
+  return modbus_write_register(client_, PARKING_MODE_REG, 0x0001);
+}
+
+int ZLAC8015D::disable_parking_mode(){
+
+  /**
+   * @brief Disable parking mode, allowing the motor to move freely.
+   * @return 0 on success, -1 on error (not connected, Modbus failure).
+   */
+
+  if (!client_) return -1;
+  return modbus_write_register(client_, PARKING_MODE_REG, 0x0000);
+}
 
 std::pair<std::string, std::string> ZLAC8015D::get_error() {
   if (!client_) return {"Not connected", "Not connected"};
@@ -712,7 +842,67 @@ std::string ZLAC8015D::get_software_version(){
   return hex16(version);
 }
 
+int ZLAC8015D::set_decel_time(uint16_t decel_time_ms) {
 
+  /**
+   * @brief Set the deceleration time for velocity mode. 
+   * @param decel_time_ms Deceleration time in milliseconds (e.g., 1000 for 1 second).
+   * @return 0 on success, -1 on error (not connected, Modbus failure).
+   * @note The Default value is 500ms.
+   */
+
+  if (!client_) return -1;
+
+  if (decel_time_ms > 32767) {
+    std::cerr << "Deceleration time must be between 0 and 32767 ms\n";
+    decel_time_ms = std::clamp<uint16_t>(decel_time_ms, 0u, 32767u);
+    std::cout << "For security we set the deceleration time to: " << decel_time_ms << " ms\n";
+  }
+
+  int rc = modbus_write_register(client_, L_DCL_TIME, decel_time_ms);
+  if (rc == -1) {
+    std::cerr << "Failed to set deceleration time in Left motor - Right motor is not setted: " << modbus_strerror(errno) << std::endl;
+    return -1;
+  }
+
+  rc = modbus_write_register(client_, R_DCL_TIME, decel_time_ms);
+  if (rc == -1) {
+    std::cerr << "Failed to set deceleration time in Right motor - Left motor was set: " << modbus_strerror(errno) << std::endl;
+    return -1;
+  }
+  return 0;
+}
+
+int ZLAC8015D::set_accel_time(uint16_t accel_time_ms) {
+
+  /**
+   * @brief Set the acceleration time for velocity mode. 
+   * @param accel_time_ms Acceleration time in milliseconds (e.g., 1000 for 1 second).
+   * @return 0 on success, -1 on error (not connected, Modbus failure).
+   * @note The Default value is 500ms.
+   */
+
+  if (!client_) return -1;
+  
+  if (accel_time_ms > 32767) {
+    std::cerr << "Acceleration time must be between 0 and 32767 ms\n";
+    accel_time_ms = std::clamp<uint16_t>(accel_time_ms, 0u, 32767u);
+    std::cout << "For security we set the acceleration time to: " << accel_time_ms << " ms\n";
+  }
+
+  int rc = modbus_write_register(client_, L_ACL_TIME, accel_time_ms);
+  if (rc == -1) {
+    std::cerr << "Failed to set acceleration time in Left motor - Right motor is not setted: " << modbus_strerror(errno) << std::endl;
+    return -1;
+  }
+
+  rc = modbus_write_register(client_, R_ACL_TIME, accel_time_ms);
+  if (rc == -1) {
+    std::cerr << "Failed to set acceleration time in Right motor - Left motor was set: " << modbus_strerror(errno) << std::endl;
+    return -1;
+  }
+  return 0;
+} 
 
                 
         
