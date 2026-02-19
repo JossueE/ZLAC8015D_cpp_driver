@@ -11,11 +11,13 @@ static void on_sigint(int) { running = false; }
 int main() {
   std::signal(SIGINT, on_sigint);
 
-  ZLAC8015D driver("/dev/ttyUSB0", 115200, "velocity");
+  ZLAC8015D driver("/dev/ttyUSB0", 115200, OperationMode::ABSOLUTE_POSITION);
   if (!driver.connect()) return (std::cerr << "Failed to connect\n", 1);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-  driver.set_speed_resolution(SpeedRes::RPM_0_1);
+  driver.set_speed_resolution();
+  driver.set_decel_time(3000); 
+  driver.set_accel_time(3000); 
 
   while (running) {
     auto [l, r] = driver.get_error();
@@ -27,14 +29,12 @@ int main() {
       std::cout << "Me Conecté...\n";
     }
 
-    driver.set_sync_rpm(105, 105); // Prueba: aplica una velocidad constante de 100 RPM a ambos motores
+    driver.set_sync_current(0.0, 0.0);
     auto [enc_left, enc_right] = driver.get_encoder_count();
     std::cout << "Encoder counts: Left: " << enc_left << " Right: " << enc_right << "\n";
 
     auto [temp_left, temp_right] = driver.get_temperature();
     std::cout << "Temperatures: Left: " << temp_left << "°C Right: " << temp_right << "°C\n";
-
-    std::cout << l << "\n" << r << "\n\n";
 
     driver.get_software_version();
     driver.get_current();
@@ -48,14 +48,14 @@ int main() {
       int code_left = std::stoi(l, nullptr, 16);   // base 16, acepta "0x...."
       decoded_left = driver.decode_error(code_left, "left");
     } catch (...) {
-      // se queda con el mensaje original (ej. "Not connected")
+
     }
 
     try {
       int code_right = std::stoi(r, nullptr, 16);
       decoded_right = driver.decode_error(code_right, "right");
     } catch (...) {
-      // se queda con el mensaje original
+
     }
 
     std::cout << "Decoded left: " << decoded_left << "\n";
@@ -65,7 +65,7 @@ int main() {
   }
 
   // Al salir con Ctrl+C: manda 0 para no dejar torque/corriente aplicada
-  driver.set_sync_rpm(0, 0);
+  driver.disable_motor();
   std::cout << "Stopped (Ctrl+C).\n";
   return 0;
 }

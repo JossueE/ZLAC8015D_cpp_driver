@@ -11,6 +11,12 @@
 #include <sstream>
 #include <iomanip>
 
+#ifdef DEBUG
+  #define DBG(msg) do { std::cerr << "[Debug] " << msg << "\n"; } while(0)
+#else
+  #define DBG(msg) do {} while(0)
+#endif
+
 #define M_PI 3.14159265358979323846
 #define counts_per_rad (4096 / (2 * M_PI)) // Assuming 4096 counts per revolution
 
@@ -94,28 +100,7 @@
 #define POS_L_START 0x11
 #define POS_R_START 0x12
 
-/*
 
-FAULT CODES:
-
-NO_FAULT = 0x0000       0
-OVER_VOLT = 0x0001      1
-UNDER_VOLT = 0x0002     2
-OVER_CURR = 0x0004      4
-OVER_LOAD = 0x0008      8
-CURR_OUT_TOL = 0x0010   16
-ENCOD_OUT_TOL = 0x0020  32
-MOTOR_BAD = 0x0040      64
-REF_VOLT_ERROR = 0x0080 128
-EEPROM_ERROR = 0x0100   256
-WALL_ERROR = 0x0200     512
-HIGH_TEMP = 0x0400      1024
-READ_MULT_REG = 0x83
-WRITE_SINGLE_REG = 0x86
-WRITE_MULTI_REG = 0x89
-GENERAL_ERROR = -1
-
-*/
 // ----------------------- Structs for Position - Velocity Control ------------------------
 
 struct VelocityMotorGains { int16_t kp, ki, kf; };
@@ -124,7 +109,28 @@ struct PositionMotorGains { int16_t kp, kf; };
 struct VelocityGains { VelocityMotorGains left, right; };
 struct PositionGains { PositionMotorGains left, right; };
 
-enum class SpeedRes { RPM_1, RPM_0_1 };
+// ------------------------------------ To Change Mode ------------------------------------
+
+enum class OperationMode {
+  VELOCITY,
+  RELATIVE_POSITION,
+  ABSOLUTE_POSITION,
+  TORQUE
+};	
+
+// ---------------------------- Overload to Print Operation Mode ----------------------------
+
+inline std::ostream& operator<<(std::ostream& os, const OperationMode& m) {
+  switch (m) {
+    case OperationMode::VELOCITY: return os << "velocity";
+    case OperationMode::RELATIVE_POSITION: return os << "relative_position";
+    case OperationMode::ABSOLUTE_POSITION: return os << "absolute_position";
+    case OperationMode::TORQUE:   return os << "torque";
+    default:                      return os << "unknown";
+  }
+}
+
+// ---------------------------------------- Driver Class ----------------------------------------
 
 class ZLAC8015D
 {
@@ -132,72 +138,280 @@ public:
 
 	ZLAC8015D(const std::string& port = "/dev/ttyUSB0",
 				int baudrate = 115200,
-				const std::string& mode = "velocity"
+				const OperationMode& mode = OperationMode::VELOCITY	
 			);
+
     ~ZLAC8015D();
 
-
+// ---------------------------------------- Communication  ----------------------------------------
+	/**
+   	 * @brief Establishes a Modbus RTU connection to the ZLAC8015D driver.
+   	 *
+   	 * Creates and connects a libmodbus RTU context using the configured serial
+   	 * port and baudrate, sets slave ID = 1, then applies the initial operation
+   	 * mode and enables the motor. On failure, cleans up resources and returns false.
+   	 *
+   	 * @return true if already connected or connection/setup succeeds; false otherwise.
+   	*/
 	bool connect();
+
+	/**
+   	 * @brief Disconnect Modbus RTU connection to the ZLAC8015D driver.
+   	 *
+   	 * If a connection exists, sends an emergency_stop to the driver, closes the Modbus and frees the context. 
+   	 * If no connection exists, simply logs that there was nothing to disconnect.
+   	 *
+   	 * @return --
+   	 * @note After calling disconnect(), the emergency_stop command disable the motor and tu use again the driver you need to call connect() - enable_motor() again.
+   	*/
 	void disconnect();
 	
-	// General
+// ---------------------------------------- General  ----------------------------------------
+	/**
+   	 * @brief Stop the motor immediately by sending the emergency stop command to the driver.
+   	 * @return -1 if no active connection, or if the emergency stop command fails; 0 on success.
+   	 * @note After calling disconnect(), the emergency_stop command disable the motor and tu use again the driver you need to call connect() - enable_motor() again.
+   	*/
 	int emergency_stop();
+
+	/**
+   	 * @brief The motor is disable without cutting the power, so it can be enabled calling enable_motor() again.
+   	 * @return -1 if no active connection, or if the emergency stop command fails; 0 on success.
+   	*/		
 	int disable_motor();
+
+	/**
+ 	 * @brief Enable the motor if it was disabled by disable_motor() or after an emergency stop.
+  	 * @return -1 if no active connection, or if the emergency stop command fails; 0 on success.
+  	*/
     int enable_motor();
-	int change_mode(std::optional<std::string> mode = std::nullopt);
+
+	/**
+  	 * @brief Clear the alarm if there is any active. It is useful to validate if the error is presented. 
+  	 * @return -1 if no active connection, or if the alarm clear command fails; 0 on success.
+  	 * 
+  	 * @note You can see if there is an active alarm if the red LEDs on the driver are flashing.
+  	*/
 	int reset_alarm();
 
-	// Encoder
+	/**
+  	 * @brief It will change to that mode if it's valid, and modify mode_ attribute.
+  	 * @return -1 if no active connection, or if the emergency stop command fails; 0 on success. Print the mode to change.
+  	*/	
+	int change_mode(OperationMode mode);
+	
+
+
+// ---------------------------------------- Encoder -----------------------------------------
+	/**
+   	 * @brief Read left and right motor encoder counts.
+   	 * @return encoder_count_left and encoder_count_right on success, -1 on error (not connected, Modbus failure).
+   	*/
 	std::pair<int32_t, int32_t> get_encoder_count();
 
-	// Control Gains Velocity - Position
+// --------------------------- Control Gains Velocity - Position  ---------------------------
+	/**
+	 * @brief Read the current control gains for velocity mode.
+	 * @return 2 Structs with the control gains for velocity mode for left and right motor on success, std::nullopt on error (not connected, Modbus failure).
+	 * @note This is a placeholder implementation. You should read the actual registers for the control gains and return them in a suitable format.
+	*/
 	std::optional<VelocityGains> get_control_gains_velocity();
+
+	/**
+   	 * @brief Read the current control gains for position mode.
+   	 * @return 2 Structs with the control gains for position mode for left and right motor on success, std::nullopt on error (not connected, Modbus failure).
+   	 * @note This is a placeholder implementation. You should read the actual registers for the control gains and return them in a suitable format.
+   	*/
 	std::optional<PositionGains> get_control_gains_position();
+
+	/**
+   	 * @brief Set the control gains for velocity mode.
+   	 * @param gains Structs with the control gains for velocity mode for left and right motor.
+   	 * leff.kp, left.ki, left.kf, right.kp, right.ki, right.kf
+   	 * @return 0 on success, -1 on error (not connected, Modbus failure).
+   	 * @note This is a placeholder implementation. You should write the actual registers for the control gains according to the format you choose for the get_control_gains_velocity() method.
+   	*/
 	int set_control_gains_velocity(VelocityGains &gains);
+
+	/**
+   	 * @brief Set the control gains for position mode.
+   	 * @param gains Structs with the control gains for position mode for left and right motor.
+   	 * left.kp, left.kf, right.kp, right.kf
+   	 * @return 0 on success, -1 on error (not connected, Modbus failure).
+   	 * @note This is a placeholder implementation. You should write the actual registers for the control gains according to the format you choose for the get_control_gains_position() method.
+   	*/
 	int set_control_gains_position(PositionGains &gains);
 	
-	// For Velocity Mode
-	int set_speed_resolution(SpeedRes res);
+// -------------------------------------  Velocity  Mode -------------------------------------
+
+	/**
+   	 * @brief Set the speed resolution for velocity mode.
+   	 * @return 0 on success, -1 on error (not connected, Modbus failure).
+   	*/
+	int set_speed_resolution();
+
+	/**
+   	 * @brief Get the current speed resolution for velocity mode.
+   	 * @return "0.1 RPM" or "1 RPM" on success, empty string on error (not connected, Modbus failure).
+   	*/
 	std::string get_speed_resolution();
-	int set_sync_rpm(int16_t L_rpm, int16_t R_rpm); 
+
+	/**
+   	 * @brief Set the target speed for both motors in velocity mode.
+   	 * @param L_rpm Target speed for the left motor in RPM (range: -1000.0 to 1000.0).
+   	 * @param R_rpm Target speed for the right motor in RPM (range: -1000.0 to 1000.0).
+   	 * @return 0 on success, -1 on error (not connected, Modbus failure, invalid mode, or invalid speed resolution).
+	 * @note Every param is going to be round to the nearest 0.1 RPM. 
+   	*/
+	int set_sync_rpm(float L_rpm, float R_rpm); 
+
+	/**
+   	 * @brief Read left and right motor actual speed
+   	 * @return rpm_left and rmp_right on success (unit: RPM), -1 on error (not connected, Modbus failure).
+   	*/
 	std::pair<float, float> get_rpm();
 
-	// For relative_position and absolute_position Mode
+// ---------------------------  Absolute and Relative Position  Mode ---------------------------
+// Depending on the mode, the position command is going to be executed as absolute or relative, but the method to set the position is the same for both modes.
+
+	/**
+   	 * @brief Sets the maximum allowed motor speed (RPM) used in position modes.
+   	 *
+   	 * Writes the per-motor max speed limits for position control (left/right) to the
+   	 * corresponding registers. Input values are clamped to [0, 50] RPM for safety
+   	 * before being written. The range is based on Official Documentation.
+   	 *
+   	 * @param L_rpm Maximum speed for the left motor in position mode (0..50 RPM).
+   	 * @param R_rpm Maximum speed for the right motor in position mode (0..50 RPM).
+   	 * @return 0 on success, -1 on error (not connected or Modbus write failure).
+	*/
 	int set_max_speed_position_mode(int16_t L_rpm, int16_t R_rpm);
+
+	/**
+	 * @brief Reads the configured maximum speed limits (RPM) used in position modes.
+	 *
+	 * Retrieves the left and right "max RPM in position mode" values from the driver
+	 * registers and returns them as a pair {left, right}. On read failure or if not
+	 * connected, returns {-1, -1}.
+	 *
+	 * @return std::pair<int,int> {left_max_rpm, right_max_rpm} on success, or {-1, -1} on error.
+	 */
 	std::pair<int, int> get_max_speed_position_mode();
+
+	/**
+	 * @brief Sends a synchronized position command (relative or absolute) to both motors.
+	 *
+	 * Requires the driver to be in a position mode ("relative_position" or
+	 * "absolute_position"); if not, it switches to relative position mode for safety.
+	 * Reads the current per-motor max speed limits for position mode and clamps them
+	 * to 50 RPM if needed. Converts input angles (radians) to encoder counts using
+	 * the fixed counts_per_rad factor, writes the 32-bit target positions for left
+	 * and right motors (4 registers starting at SET_POS), then triggers a synchronized
+	 * position start via CONTROL_REG (POS_SYNC).
+	 *
+	 * @param L_rad Target left position in radians (interpreted as relative/absolute depending on current mode).
+	 * @param R_rad Target right position in radians (interpreted as relative/absolute depending on current mode).
+	 * @return 0 on success, -1 on error (not connected, Modbus failure, or partial write).
+	*/
 	int set_sync_position(float L_rad, float R_rad);
 
-	// For Torque Mode
+// -------------------------------------- Torque Mode --------------------------------------
+
+	/**
+	 * @brief Sends a synchronized current command to both motors.
+	 *
+	 * Requires the driver to be in "current" mode; if not, it switches to current
+	 * mode for safety. Writes the target currents for left and right motors (2 registers
+	 * starting at SET_CURRENT), then triggers a synchronized current start via CONTROL_REG (CURR_SYNC).
+	 *
+	 * @param L_mA Target left current in milliamps.
+	 * @param R_mA Target right current in milliamps.
+	 * @return 0 on success, -1 on error (not connected, Modbus failure, or partial write).
+	*/			
 	int set_sync_current(int16_t L_mA, int16_t R_mA);
+
+	/**
+   	 * @brief Read left and right motor actual current
+   	 * @return current_left and current_right on success (unit: A), -1 on error (not connected, Modbus failure).
+   	*/
 	std::pair<float, float> get_current();
 
-	// Parking Mode
+// -------------------------------------- Parking Mode --------------------------------------
+
+	/**
+     * @brief Enable parking mode, limit the current of the motor to 3A and this function to prevent the motor from over temperature problem.
+     * @return 0 on success, -1 on error (not connected, Modbus failure).
+    */
 	int enable_parking_mode();
+
+	/**
+   	 * @brief Disable parking mode, allowing the motor to move freely.
+   	 * @return 0 on success, -1 on error (not connected, Modbus failure).
+   	*/
 	int disable_parking_mode();
 
-	// Error and troubleshooting
+// -------------------------------- Error and troubleshooting --------------------------------
+	
+	/**
+   	 * @brief Read the error registers for both motors and return their values as hexadecimal strings.
+   	 * @return A pair of strings containing the hexadecimal representation of the left and right error registers on success, or error messages on failure (not connected, Modbus failure).
+   	*/
 	std::pair<std::string, std::string> get_error();
+
+	/**
+     * @brief Decode the error register value into human-readable faults and possible causes.
+     * @param reg The 16-bit error register value read from the driver for either left or right motor.
+     * @param side A string indicating which motor the error register corresponds to ("Left" or "Right") for clearer output.
+     * @return 0 on success, -1 on error (not connected, Modbus failure).
+    */
 	std::string decode_error(uint16_t reg, const char* side);
+
+	/**
+     * @brief Read left and right motor temperature in Celsius.
+     * @return temp_left and temp_right in °C on success, -1 on error (not connected, Modbus failure).
+    */
 	std::pair<int, int> get_temperature();
+
+	/**
+     * @brief Read the driver software version.
+     * @return version number on success, -1 on error (not connected, Modbus failure).
+    */
 	std::string get_software_version();
 
-	// Internal ramps
+// ------------------------------------- Internal Ramps -------------------------------------
+	/**
+     * @brief Set the deceleration time for velocity mode. 
+     * @param decel_time_ms Deceleration time in milliseconds (e.g., 1000 for 1 second).
+     * @return 0 on success, -1 on error (not connected, Modbus failure).
+     * @note The Default value is 500ms.
+	*/
 	int set_decel_time(uint16_t decel_time_ms);
-	int set_accel_time(uint16_t accel_time_ms);
-	
-	
 
+	/**
+	 * @brief Set the acceleration time for velocity mode. 
+     * @param accel_time_ms Acceleration time in milliseconds (e.g., 1000 for 1 second).
+     * @return 0 on success, -1 on error (not connected, Modbus failure).
+     * @note The Default value is 500ms.
+    */
+	int set_accel_time(uint16_t accel_time_ms);
 
 private:
 	std::string port_;
-	std::string mode_;
+	OperationMode mode_;
     int baudrate_;
     modbus_t* client_ = nullptr;
 
+	/**
+  	* @brief Private method that set the mode of the driver according to the mode_ attribute, it will be called by change_mode() and connect() methods.
+  	* @return -1 if no active connection, or if the emergency stop command fails; 0 on success. Print the mode to change.
+  	*/
 	int set_mode();
-	static bool is_valid_mode(const std::string& m);
-	std::string hex16(uint16_t v); 
-	
 
+	/** 
+   	 * @brief Convert a 16-bit unsigned integer to a hexadecimal string in the format "0xABCD".
+     * @param v The 16-bit unsigned integer to convert.
+     * @return A string representing the hexadecimal value of v, formatted as "0xABCD".
+    */
+	std::string hex16(uint16_t v); 
 };
 
