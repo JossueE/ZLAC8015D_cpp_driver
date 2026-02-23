@@ -601,7 +601,6 @@ std::string ZLAC8015D::decode_error(uint16_t reg, const char* side){
         break;
 
       default:
-        // Si hay bits que tu manual no documenta o aún no mapeaste
         out << "\n- Unknown fault bit set: 0x"
             << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << bit
             << std::dec << "\n";
