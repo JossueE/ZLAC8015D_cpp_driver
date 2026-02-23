@@ -26,7 +26,7 @@ int main() {
       driver.reset_alarm();
       std::this_thread::sleep_for(std::chrono::milliseconds(3000));
       driver.enable_motor();
-      std::cout << "Me Conecté...\n";
+      std::cout << "I'm Connect...\n";
     }
 
     driver.set_sync_current(0.0, 0.0);
@@ -40,7 +40,6 @@ int main() {
     driver.get_current();
     driver.get_rpm();
 
-    // --- NO CRASHEA si l/r no son hex ---
     std::string decoded_left = l;
     std::string decoded_right = r;
 

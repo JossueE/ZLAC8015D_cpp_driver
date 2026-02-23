@@ -314,10 +314,10 @@ int ZLAC8015D::set_sync_rpm(float L_rpm, float R_rpm) {
   L_rpm = std::round(L_rpm * 10.0f);
   R_rpm = std::round(R_rpm * 10.0f);
 
-  if (L_rpm < -1000.0f || L_rpm > 1000.0f || R_rpm < -1000.0f || R_rpm > 1000.0f) {
-    std::cerr << "RPM must be between -1000.0 and 1000.0\n";
-    L_rpm = std::clamp<float>(L_rpm, -1000.0f, 1000.0f);
-    R_rpm = std::clamp<float>(R_rpm, -1000.0f, 1000.0f);
+  if (L_rpm < -30000.0f || L_rpm > 30000.0f || R_rpm < -30000.0f || R_rpm > 30000.0f) {
+    std::cerr << "RPM must be between -3000.0 and 3000.0\n";
+    L_rpm = std::clamp<float>(L_rpm, -30000.0f, 30000.0f);
+    R_rpm = std::clamp<float>(R_rpm, -30000.0f, 30000.0f);
   }
 
   uint16_t regs[2]{0, 0};           
@@ -366,10 +366,10 @@ int ZLAC8015D::set_max_speed_position_mode(int16_t L_rpm, int16_t R_rpm){
     change_mode(OperationMode::RELATIVE_POSITION);
   }
 
-  if(L_rpm < 0 || L_rpm > 50 || R_rpm < 0 || R_rpm > 50) {
+  if(L_rpm < 0 || L_rpm > 1000 || R_rpm < 0 || R_rpm > 1000) { // Max 1000 RPM
     std::cerr << "RPM must be between 0 and 50\n";
-    L_rpm = std::clamp<int16_t>(L_rpm, 0, 50);
-    R_rpm = std::clamp<int16_t>(R_rpm, 0, 50);
+    L_rpm = std::clamp<int16_t>(L_rpm, 0, 1000);
+    R_rpm = std::clamp<int16_t>(R_rpm, 0, 1000);
     DBG("For security we set the max speed for position mode to: " << L_rpm << " for left and " << R_rpm << " for right\n");
   }
 
@@ -413,8 +413,8 @@ int ZLAC8015D::set_sync_position(float L_rad, float R_rad){
     DBG("Failed to get max speed for position mode, cannot set relative position\n");
   }
 
-  if (max_rpm_L > 50 || max_rpm_R > 50 || max_rpm_L <= 0 || max_rpm_R <= 0) {
-    if(set_max_speed_position_mode(50, 50) == 0){
+  if (max_rpm_L > 1000 || max_rpm_R > 1000 || max_rpm_L <= 0 || max_rpm_R <= 0) {
+    if(set_max_speed_position_mode(1000, 1000) == 0){
       DBG("FOR SECURITY: Set default max speed for position mode to 50 RPM for both motors\n");
     }
     else {
@@ -450,10 +450,10 @@ int ZLAC8015D::set_sync_current(int16_t L_mA, int16_t R_mA){
     change_mode(OperationMode::TORQUE);
   }
 
-  if (L_mA < -2000 || L_mA > 2000 || R_mA < -2000 || R_mA > 2000) {
+  if (L_mA < -30000 || L_mA > 30000 || R_mA < -30000 || R_mA > 30000) { // Max 30A
     std::cerr << "Current must be between -2000 mA and 2000 mA\n";
-    L_mA = std::clamp<int16_t>(L_mA, -2000, 2000);
-    R_mA = std::clamp<int16_t>(R_mA, -2000, 2000);
+    L_mA = std::clamp<int16_t>(L_mA, -30000, 30000);
+    R_mA = std::clamp<int16_t>(R_mA, -30000, 30000);
     DBG("For security we set the max current for torque mode to: " << L_mA << " mA for left and " << R_mA << " mA for right\n");
   }
 
