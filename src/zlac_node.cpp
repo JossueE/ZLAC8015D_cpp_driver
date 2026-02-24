@@ -188,7 +188,7 @@ private:
     // If more than one publisher   
     const size_t pubs = count_publishers("cmd_vel_safe");
     if (pubs > 1 || pubs == 0) {
-      RCLCPP_FATAL(get_logger(), "More than one publisher on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
+      RCLCPP_FATAL(get_logger(), "More than one publisher or No publishers on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
       motors_.set_decel_time(16000);
       motors_.set_sync_rpm(0,0);
       rclcpp::shutdown();
