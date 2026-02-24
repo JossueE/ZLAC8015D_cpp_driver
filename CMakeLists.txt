@@ -5,60 +5,73 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
-
-# Headers propios
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-# ---- libmodbus (recomendado vía pkg-config) ----
+find_package(geometry_msgs)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(MODBUS REQUIRED libmodbus)
 
-add_library(zlac_driver
-  src/zlac8015d_driver.cpp
+pkg_check_modules(MODBUS REQUIRED IMPORTED_TARGET libmodbus)
+
+add_library(zlac8015d_driver
+  src/zlac8015d_driver/zlac8015d_driver.cpp
 )
 
-target_link_libraries(zlac_driver PUBLIC
-  ${MODBUS_LIBRARIES}
+target_include_directories(zlac8015d_driver PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
 )
 
-target_compile_options(zlac_driver PUBLIC
-  ${MODBUS_CFLAGS_OTHER}
+target_link_libraries(zlac8015d_driver
+  PkgConfig::MODBUS
 )
 
-# MACRO DEFINITION
-target_compile_definitions(zlac_driver PRIVATE $<$<CONFIG:Debug>:DEBUG>)
+add_executable(zlac_node
+  src/zlac_node.cpp
+)
 
-ament_target_dependencies(zlac_driver
+target_link_libraries(zlac_node
+  zlac8015d_driver
+)
+
+ament_target_dependencies(zlac_node
   rclcpp
   std_msgs
+  geometry_msgs
 )
 
-# ---- (Nodo ejecutable ----
-# Si tienes algo como src/zlac_node.cpp, descomenta:
-# add_executable(zlac_node src/zlac_node.cpp)
-# target_link_libraries(zlac_node PRIVATE zlac_driver)
-# ament_target_dependencies(zlac_node rclcpp std_msgs)
-# install(TARGETS zlac_node DESTINATION lib/${PROJECT_NAME})
+target_compile_definitions(zlac_node PRIVATE
+  $<$<CONFIG:Debug>:DEBUG>
+)
 
-install(DIRECTORY include/
+add_executable(test_driver
+  src/zlac8015d_driver/test_driver.cpp
+)
+
+target_include_directories(test_driver PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_driver
+  zlac8015d_driver
+)
+
+install(
+  DIRECTORY include/
   DESTINATION include
 )
 
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
+install(
+  TARGETS
+    zlac8015d_driver
+    zlac_node
+    test_driver
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()

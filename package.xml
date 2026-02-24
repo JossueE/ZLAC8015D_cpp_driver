@@ -11,8 +11,8 @@
 
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
 
-  <!-- It's necessary to stablish Serial Communication -->
   <exec_depend>libmodbus-dev</exec_depend>
   <build_depend>libmodbus-dev</build_depend>
   
