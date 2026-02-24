@@ -95,6 +95,9 @@ public:
     // But the motor isn't start the movement until enable, we set before to make sure that the value is properly setted.
     motors_.set_sync_rpm(0.0, 0.0);
 
+    // Enable the motor after set initial speed
+    motors_.enable_motor();
+
   }
 
 private:
@@ -167,7 +170,7 @@ private:
     );
 
     // Warnings
-    if (temp_left > 85 || temp_right > 85 || temp_left < 60 || temp_right < 60) { // 55 - 120 °C
+    if (temp_left > 70 || temp_right > 70) { // 55 - 120 °C
       RCLCPP_WARN(this->get_logger(), "[WARN_MON] High or Low temperature in wheels: L=%.1fC R=%.1fC", (double)temp_left, (double)temp_right);
       RCLCPP_WARN(this->get_logger(), "[WARN_MON] High or Low temperature: The normal operation range is 55 - 120 °C");
       
@@ -179,9 +182,9 @@ private:
       RCLCPP_WARN(this->get_logger(), "[WARN_MON] High RPM: Max value for Position Mode is 1000 RPM, for Velocity 3000 RPM");
     }
 
-    if (std::abs((double)current_left) > 25.0 || std::abs((double)current_right) > 25.0) { // Max value = 30A
+    if (std::abs((double)current_left) > 25000.0 || std::abs((double)current_right) > 25000.0) { // Max value = 30A
       RCLCPP_WARN(this->get_logger(),
-        "[WARN_MON] High current: L=%.2fA R=%.2fA \n", (double)current_left, (double)current_right);
+        "[WARN_MON] High current: L=%.2fmA R=%.2fmA \n", (double)current_left, (double)current_right);
         RCLCPP_WARN(this->get_logger(), "[WARN_MON] High current: Max value for current is 30A");
     }    
 
@@ -189,19 +192,34 @@ private:
     const size_t pubs = count_publishers("cmd_vel_safe");
     if (pubs > 1 || pubs == 0) {
       RCLCPP_FATAL(get_logger(), "More than one publisher or No publishers on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
-      motors_.set_decel_time(16000);
+      motors_.set_decel_time(3000);
       motors_.set_sync_rpm(0,0);
-      rclcpp::shutdown();
     }
 
   }
 
   void error_handler(bool &warned_overheat, bool &warned_speedfail, int &error_count){
 
-    auto [error_msg_left, error_msg_right] = motors_.get_error();      
+    auto [error_msg_left, error_msg_right] = motors_.get_error();    
 
-    RCLCPP_ERROR(this->get_logger(), "%s", motors_.decode_error(std::stoi(error_msg_left, nullptr, 16), "Left").c_str());
-    RCLCPP_ERROR(this->get_logger(), "%s", motors_.decode_error(std::stoi(error_msg_right, nullptr, 16), "Right").c_str());
+    std::string decoded_left = error_msg_left;
+    std::string decoded_right = error_msg_right;
+    try {
+      int code_left = std::stoi(error_msg_left, nullptr, 16);
+      decoded_left = motors_.decode_error(code_left, "left");
+    } catch (const std::exception &e) {
+      RCLCPP_WARN(this->get_logger(), "We cant recognize left error '%s': %s", error_msg_left.c_str(), e.what());
+    }
+
+    try {
+      int code_right = std::stoi(error_msg_right, nullptr, 16);
+      decoded_right = motors_.decode_error(code_right, "right");
+    } catch (const std::exception &e) {
+      RCLCPP_WARN(this->get_logger(), "We cant recognize right error '%s': %s", error_msg_right.c_str(), e.what());
+    }
+
+    RCLCPP_ERROR(this->get_logger(), "Left motor error: %s", decoded_left.c_str());
+    RCLCPP_ERROR(this->get_logger(), "Right motor error: %s", decoded_right.c_str());
 
   // ------------------------- CRITICS: Immediately Stop -------------------------
     if (error_msg_left == "0x0800" || error_msg_right == "0x0800" ||   // Encoder Error
@@ -241,8 +259,8 @@ private:
       auto[rpm_left, rpm_right] = motors_.get_rpm();
       if (rpm_left > 2500 || rpm_right > 2500){
         RCLCPP_WARN(this->get_logger(),"Too high speed detected in ZLAC8015D driver. RPM Left:  %.1f, RPM Right:  %.1f", rpm_left, rpm_right);
-        motors_.set_decel_time(16000);
-        motors_.set_accel_time(16000);
+        motors_.set_decel_time(3000);
+        motors_.set_accel_time(3000);
         motors_.set_sync_rpm(1000.0, 1000.0); // Position 1000 RPM // Velocity 3000 RPM
         RCLCPP_WARN(this->get_logger(), "For security the speed is set to 100 RPM, Acceleration and deceleration set to 16 seconds");
       }
@@ -258,7 +276,7 @@ private:
       }
     }
 
-    // Intento de recuperación
+    // Try of recuperation
     motors_.reset_alarm();
     motors_.enable_motor();
   };
@@ -281,6 +299,9 @@ private:
     static bool flag = false;
     const double vx = msg->linear.x;
     const double wz = msg->angular.z;
+
+    RCLCPP_DEBUG(this->get_logger(), "Angular Speed:  %.1f, Linear Speed:  %.1f", wz, vx);
+
     if(vx == 0.0 && wz == 0.0){
       if(!flag){
         flag = true;
@@ -295,8 +316,12 @@ private:
         flag=false;
       }
     }
+
     auto [rpm_l, rpm_r] = twist_to_rpm(vx, wz);
+    RCLCPP_DEBUG(this->get_logger(), "Publish Speed RPM LEFT:  %.1f, RIGHT:  %.1f", rpm_l, rpm_r);
+
     motors_.set_sync_rpm(rpm_l, rpm_r);
+
   }
 
   void movement_lock_timer(){
