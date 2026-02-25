@@ -11,19 +11,24 @@
 static constexpr double PI{3.14159265358979323846};
 
 using namespace std::chrono_literals;
+
+std::string node_name = "wheels_driver";
+
+
 class ZlacNode : public rclcpp::Node {
 public:
-  ZlacNode(const std::string &port) : Node("zlac_node"), port_(port) {
+  ZlacNode(const std::string &port) : Node(node_name), port_(port) {
 
     // Wheels configuration parameters
     this->declare_parameter<bool>("wheelR_is_backward", false);
-    this->declare_parameter<bool>("wheelL_is_backward", false);
+    this->declare_parameter<bool>("wheelL_is_backward", true);
     this->declare_parameter<double>("wheels_separation", 0.4f);
     this->declare_parameter<double>("wheel_radius", 0.1f);
 
-    // Acceleration and deceleration time for velocity control mode
-    this->declare_parameter<int>("accel_time_ms", 3000);  // The driver can receive accel for left and right wheel separately, but for simplicity we use the same value for both.
-    this->declare_parameter<int>("decel_time_ms", 3000);  // The driver can receive decel for left and right wheel separately, but for simplicity we use the same value for both.
+    // Acceleration and deceleration time for velocity control mode. 
+    // The driver can receive accel for left and right wheel separately.
+    this->declare_parameter<int>("accel_time_ms", 3000);
+    this->declare_parameter<int>("decel_time_ms", 3000);  
 
     //Driver Movement Lock
     this->declare_parameter<bool>("unlock_driver", true); 
@@ -62,21 +67,23 @@ public:
     // -------------------------------------- Timers to Manage the Driver Control ----------------------------------------
     warning_timer_ = this->create_wall_timer(1000ms, std::bind(&ZlacNode::warning_handler, this));
     wheel_ticks_timer_ = this->create_wall_timer(20ms, std::bind(&ZlacNode::wheel_ticks_timer, this));
+
     movement_lock_timer_ = this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::duration<double>(time_disabled_driver_s_)), std::bind(&ZlacNode::movement_lock_timer, this));
     movement_lock_timer_->cancel();
 
     // ------------------------------------------- Publishers and Subscribers --------------------------------------------
-    pub_left_data_ = this->create_publisher<std_msgs::msg::Float64>("wheel/left_data", 10); //Recomendation: Send both in one message
+    pub_left_data_ = this->create_publisher<std_msgs::msg::Float64>("wheel/left_data", 10); //Recommendation: Send both in one message
     pub_right_data_ = this->create_publisher<std_msgs::msg::Float64>("wheel/right_data", 10);
-    sub_cmd_vel_ = this->create_subscription<geometry_msgs::msg::Twist>("cmd_vel_safe", 10, std::bind(&ZlacNode::command_vel_CB, this, std::placeholders::_1));
+    sub_cmd_vel_ = this->create_subscription<geometry_msgs::msg::Twist>(
+      "cmd_vel_safe", 10, std::bind(&ZlacNode::command_vel_CB, this, std::placeholders::_1));
 
-    // ----------------------------------------- Inizialization of Motor Control -----------------------------------------
+    // ----------------------------------------- Initialization of Motor Control -----------------------------------------
 
     motors_ = ZLAC8015D(port_, 115200, OperationMode::VELOCITY);
 
     if (!motors_.connect()) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to connect to ZLAC8015D driver on port %s", port_.c_str());
+      RCLCPP_ERROR(rclcpp::get_logger(node_name), "Failed to connect to ZLAC8015D driver on port %s", port_.c_str());
       rclcpp::shutdown();
     } else {
       RCLCPP_INFO(this->get_logger(), "Successfully connected to ZLAC8015D driver on port %s", port_.c_str());
@@ -98,6 +105,7 @@ public:
     // Enable the motor after set initial speed
     motors_.enable_motor();
 
+    RCLCPP_INFO(get_logger(), "Node initialized");
   }
 
 private:
@@ -113,6 +121,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_right_data_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
 
+  std_msgs::msg::Float64 msg_left_, msg_right_;
 
   bool wheelR_is_backward_;
   bool wheelL_is_backward_;
@@ -146,23 +155,23 @@ private:
     };
 
     if (error_msg_left == "0x0000" && error_msg_right == "0x0000"){ 
-        if (warned_speedfail && std::abs((double)rpm_left) < 2500 && std::abs((double)rpm_right) < 2500){
-          RCLCPP_INFO(this->get_logger(),"Speed back to normal. Resuming normal operation.");
-          motors_.set_decel_time(decel_time_ms_);
-          motors_.set_accel_time(accel_time_ms_);
-          warned_speedfail = false;
-        }
+      if (warned_speedfail && std::abs((double)rpm_left) < 2500 && std::abs((double)rpm_right) < 2500){
+        RCLCPP_INFO(this->get_logger(),"Speed back to normal. Resuming normal operation.");
+        motors_.set_decel_time(decel_time_ms_);
+        motors_.set_accel_time(accel_time_ms_);
+        warned_speedfail = false;
+      }
 
-        if (warned_overheat && temp_left < 85 && temp_right < 85 ){
-          RCLCPP_INFO(this->get_logger(),"Temperature back to normal. Resuming normal operation.");
-          motors_.disable_parking_mode();
-          warned_overheat = false;
-        }
+      if (warned_overheat && temp_left < 85 && temp_right < 85 ){
+        RCLCPP_INFO(this->get_logger(),"Temperature back to normal. Resuming normal operation.");
+        motors_.disable_parking_mode();
+        warned_overheat = false;
+      }
       error_count = 0;
     }
 
     // Debug message
-    RCLCPP_DEBUG(this->get_logger(), "[WARN_MON] enc(L=%ld R=%ld) rpm(L=%.1f R=%.1f) I(L=%.2fA R=%.2fA) T(L=%.1fC R=%.1fC)",
+    RCLCPP_DEBUG(get_logger(), "[WARN_MON] enc(L=%ld R=%ld) rpm(L=%.1f R=%.1f) I(L=%.2fA R=%.2fA) T(L=%.1fC R=%.1fC)",
       static_cast<long>(count_left), static_cast<long>(count_right),
       static_cast<double>(rpm_left), static_cast<double>(rpm_right),
       static_cast<double>(current_left), static_cast<double>(current_right),
@@ -171,29 +180,32 @@ private:
 
     // Warnings
     if (temp_left > 70 || temp_right > 70) { // 55 - 120 °C
-      RCLCPP_WARN(this->get_logger(), "[WARN_MON] High or Low temperature in wheels: L=%.1fC R=%.1fC", (double)temp_left, (double)temp_right);
-      RCLCPP_WARN(this->get_logger(), "[WARN_MON] High or Low temperature: The normal operation range is 55 - 120 °C");
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "[WARN_MON] High or Low temperature in wheels: L=%.1fC R=%.1fC", (double)temp_left, (double)temp_right);
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "[WARN_MON] High or Low temperature: The normal operation range is 55 - 120 °C");
       
     }
 
     if (std::abs((double)rpm_left) > 2500 || std::abs((double)rpm_right) > 2500) {
-      RCLCPP_WARN(this->get_logger(),
+      RCLCPP_WARN(rclcpp::get_logger(node_name),
         "[WARN_MON] High RPM: L=%.1f R=%.1f \n", (double)rpm_left, (double)rpm_right);
-      RCLCPP_WARN(this->get_logger(), "[WARN_MON] High RPM: Max value for Position Mode is 1000 RPM, for Velocity 3000 RPM");
+      RCLCPP_WARN(rclcpp::get_logger(node_name), 
+        "[WARN_MON] High RPM: Max value for Position Mode is 1000 RPM, for Velocity 3000 RPM");
     }
 
     if (std::abs((double)current_left) > 25000.0 || std::abs((double)current_right) > 25000.0) { // Max value = 30A
-      RCLCPP_WARN(this->get_logger(),
+      RCLCPP_WARN(rclcpp::get_logger(node_name),
         "[WARN_MON] High current: L=%.2fmA R=%.2fmA \n", (double)current_left, (double)current_right);
-        RCLCPP_WARN(this->get_logger(), "[WARN_MON] High current: Max value for current is 30A");
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "[WARN_MON] High current: Max value for current is 30A");
     }    
 
     // If more than one publisher   
     const size_t pubs = count_publishers("cmd_vel_safe");
     if (pubs > 1 || pubs == 0) {
-      RCLCPP_FATAL(get_logger(), "More than one publisher or No publishers on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
+      RCLCPP_FATAL(rclcpp::get_logger(node_name), "More than one publisher or No publishers on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
       motors_.set_decel_time(3000);
       motors_.set_sync_rpm(0,0);
+      // Destroy node
+      rclcpp::shutdown();
     }
 
   }
@@ -215,25 +227,24 @@ private:
       int code_right = std::stoi(error_msg_right, nullptr, 16);
       decoded_right = motors_.decode_error(code_right, "right");
     } catch (const std::exception &e) {
-      RCLCPP_WARN(this->get_logger(), "We cant recognize right error '%s': %s", error_msg_right.c_str(), e.what());
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "We cant recognize right error '%s': %s", error_msg_right.c_str(), e.what());
     }
 
-    RCLCPP_ERROR(this->get_logger(), "Left motor error: %s", decoded_left.c_str());
-    RCLCPP_ERROR(this->get_logger(), "Right motor error: %s", decoded_right.c_str());
+    RCLCPP_ERROR(rclcpp::get_logger(node_name), "Left motor error: %s", decoded_left.c_str());
+    RCLCPP_ERROR(rclcpp::get_logger(node_name), "Right motor error: %s", decoded_right.c_str());
 
-  // ------------------------- CRITICS: Immediately Stop -------------------------
+    // ------------------------- CRITICS: Immediately Stop -------------------------
     if (error_msg_left == "0x0800" || error_msg_right == "0x0800" ||   // Encoder Error
         error_msg_left == "0x0020" || error_msg_right == "0x0020" ||   // Encoder Value out of Tolerance
         error_msg_left == "0x0080" || error_msg_right == "0x0080" ||   // Reference Voltage Error
         error_msg_left == "0x0200" || error_msg_right == "0x0200")     // Hall Error
     {
-      RCLCPP_FATAL(this->get_logger(), "Critical error detected in ZLAC8015D driver. Emergency stop + shutdown.");
+      RCLCPP_FATAL(rclcpp::get_logger(node_name), "Critical error detected in ZLAC8015D driver. Emergency stop + shutdown.");
       motors_.emergency_stop();
       rclcpp::shutdown();
-      return;
     }
 
-  // ------------------------- RECOVERABLES: Try to Recover -------------------------
+    // ------------------------- RECOVERABLE: Try to Recover -------------------------
     if (error_msg_left == "0x0001" || error_msg_right == "0x0001" ||   // Over Voltage Error
         error_msg_left == "0x0002" || error_msg_right == "0x0002" ||   // Under Voltage Error
         error_msg_left == "0x0004" || error_msg_right == "0x0004" ||   // Overcurrent Fault 
@@ -242,17 +253,15 @@ private:
     {
       error_count++;
 
-      // Si persiste muchas veces, apagamos para proteger hardware
       if (error_count >= 5) {
-        RCLCPP_ERROR(this->get_logger(),"ZLAC error detected %d times, shutting down to prevent damage.", error_count);
+        RCLCPP_ERROR(rclcpp::get_logger(node_name),"ZLAC error detected %d times, shutting down to prevent damage.", error_count);
         motors_.emergency_stop(); // The wheels are going to be locked
         rclcpp::shutdown();
-        return;
       }
-      RCLCPP_WARN(this->get_logger(), "Recoverable ZLAC error detected. Attempt %d/5.", error_count);
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "Recoverable ZLAC error detected. Attempt %d/5.", error_count);
     }
 
-  // ------------------------- No Emergency_Stop Needed -------------------------
+    // ------------------------- No Emergency_Stop Needed -------------------------
 
     if (error_msg_left == "0x2000" || error_msg_right == "0x2000") {   // Speed Setting Error 
       warned_speedfail = true;
@@ -270,28 +279,25 @@ private:
       warned_overheat = true;
       auto[temp_left, temp_right] = motors_.get_temperature();
       if (temp_left > 100 || temp_right > 100) {
-        RCLCPP_WARN(this->get_logger(), "Temperature too high detected in ZLAC8015D driver. Temp Left: %d °C, Temp Right: %d °C", temp_left, temp_right);
+        RCLCPP_WARN(rclcpp::get_logger(node_name), "Temperature too high detected in ZLAC8015D driver. Temp Left: %d °C, Temp Right: %d °C", temp_left, temp_right);
         motors_.enable_parking_mode();
-        RCLCPP_WARN(this->get_logger(), "For security the current is limited to 3A, but the motor can still be used. Monitor the temperature and reduce the load to prevent overheating.");
+        RCLCPP_WARN(rclcpp::get_logger(node_name), "For security the current is limited to 3A, but the motor can still be used. Monitor the temperature and reduce the load to prevent overheating.");
       }
     }
 
     // Try of recuperation
     motors_.reset_alarm();
     motors_.enable_motor();
-  };
+  }
 
   void wheel_ticks_timer(){
     auto [count_left, count_right] = motors_.get_encoder_count();
 
-    std_msgs::msg::Float64 msg_left;
-    std_msgs::msg::Float64 msg_right;
+    msg_left_.data  = static_cast<double>(count_left);
+    msg_right_.data = static_cast<double>(count_right);
 
-    msg_left.data  = static_cast<double>(count_left);
-    msg_right.data = static_cast<double>(count_right);
-
-    pub_left_data_->publish(msg_left);
-    pub_right_data_->publish(msg_right);
+    pub_left_data_->publish(msg_left_);
+    pub_right_data_->publish(msg_right_);
   }
   
   void command_vel_CB(const geometry_msgs::msg::Twist::SharedPtr msg){
@@ -300,7 +306,7 @@ private:
     const double vx = msg->linear.x;
     const double wz = msg->angular.z;
 
-    RCLCPP_DEBUG(this->get_logger(), "Angular Speed:  %.1f, Linear Speed:  %.1f", wz, vx);
+    // RCLCPP_DEBUG(this->get_logger(), "Angular Speed:  %.1f, Linear Speed:  %.1f", wz, vx);
 
     if(vx == 0.0 && wz == 0.0){
       if(!flag){
@@ -318,10 +324,9 @@ private:
     }
 
     auto [rpm_l, rpm_r] = twist_to_rpm(vx, wz);
-    RCLCPP_DEBUG(this->get_logger(), "Publish Speed RPM LEFT:  %.1f, RIGHT:  %.1f", rpm_l, rpm_r);
+    // RCLCPP_DEBUG(this->get_logger(), "Publish Speed RPM LEFT:  %.1f, RIGHT:  %.1f", rpm_l, rpm_r);
 
     motors_.set_sync_rpm(rpm_l, rpm_r);
-
   }
 
   void movement_lock_timer(){
@@ -354,12 +359,26 @@ private:
   }
 };
 
+
 int main(int argc, char * argv[]) {
+  auto logger = rclcpp::get_logger(node_name);
+
+  std::string port = "";
+
+  if (argc >= 2) {
+    port = argv[1];
+    // Validate if port exists
+    if (access(port.c_str(), F_OK) != 0) {
+      RCLCPP_ERROR(logger, "Port %s does not exist", port.c_str());
+      return 1;
+    }
+    RCLCPP_INFO(logger, "Port: %s", port.c_str());
+  }else{
+    RCLCPP_ERROR(logger, "No argument given. Usage: \n$ ros2 run <package_name> <node_name> <port>");
+    return 1;
+  }
+
   rclcpp::init(argc, argv);
-
-  std::string port = "/dev/ttyUSB0";
-  if (argc > 1) port = argv[1];
-
   rclcpp::spin(std::make_shared<ZlacNode>(port));
   rclcpp::shutdown();
   return 0;

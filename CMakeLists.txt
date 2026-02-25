@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(zlac8015d_cpp_driver)
+project(zlac8015d_driver2_cpp)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -14,64 +14,45 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs)
 find_package(PkgConfig REQUIRED)
 
+
+message(WARNING "libmodbus-dev apt package MUST BE installed ...")
 pkg_check_modules(MODBUS REQUIRED IMPORTED_TARGET libmodbus)
 
-add_library(zlac8015d_driver
-  src/zlac8015d_driver/zlac8015d_driver.cpp
-)
 
-target_include_directories(zlac8015d_driver PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
+set(dependencies "rclcpp" "std_msgs" "geometry_msgs") # Dependencies for node
 
-target_link_libraries(zlac8015d_driver
-  PkgConfig::MODBUS
-)
+# Define include directories
+set(INCLUDE_DIRS include)
 
-add_executable(zlac_node
-  src/zlac_node.cpp
-)
+## IMPORTANT include dirs
+include_directories(${ament_cmake_INCLUDE_DIRS} ${INCLUDE_DIRS})
 
-target_link_libraries(zlac_node
-  zlac8015d_driver
-)
+## Declare a C++ library
+set(LIBS_FILES src/zlac8015d_driver/zlac8015d_driver.cpp)
 
-ament_target_dependencies(zlac_node
-  rclcpp
-  std_msgs
-  geometry_msgs
-)
 
-target_compile_definitions(zlac_node PRIVATE
-  $<$<CONFIG:Debug>:DEBUG>
-)
+add_library(${PROJECT_NAME}_LIBRARIES ${LIBS_FILES} ${INCLUDE_DIRS})
+add_library(zlac8015d_driver STATIC ${LIBS_FILES} $<$<CONFIG:Debug>:DEBUG>) #?????????? SOLO POR DEBUG MODE??
+target_include_directories(zlac8015d_driver PUBLIC include)
 
-add_executable(test_driver
-  src/zlac8015d_driver/test_driver.cpp
-)
+add_executable(wheels_driver src/wheels_driver.cpp ${LIBS_FILES})
+ament_target_dependencies(wheels_driver ${dependencies})
+target_link_libraries(wheels_driver zlac8015d_driver) # link with the encoder library
+target_link_libraries(zlac8015d_driver PkgConfig::MODBUS)
 
-target_include_directories(test_driver PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
 
-target_link_libraries(test_driver
-  zlac8015d_driver
-)
+# No ROS 2 node, but compiled and run as a one
+add_executable(test_driver src/zlac8015d_driver/test_driver.cpp)
+target_link_libraries(test_driver zlac8015d_driver) #PkgConfig::MODBUS
+message(" ****** Test code without ROS 2 ****** ")
 
-install(
-  DIRECTORY include/
-  DESTINATION include
-)
 
-install(
-  TARGETS
-    zlac8015d_driver
-    zlac_node
-    test_driver
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION lib/${PROJECT_NAME}
-)
+install(TARGETS
+  wheels_driver   # ROS 2 node
+  test_driver     # No ROS 2 node, but compiled and run as a one
+  DESTINATION lib/${PROJECT_NAME})
+
+install(DIRECTORY src include
+  DESTINATION share/${PROJECT_NAME})
 
 ament_package()

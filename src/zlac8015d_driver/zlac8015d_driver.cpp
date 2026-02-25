@@ -28,7 +28,7 @@ bool ZLAC8015D::connect(){
     return false;
   }
 
-  // Aplica el modo inicial
+  // Initial mode
   if (set_mode() == -1 || enable_motor() == -1) {
     disconnect();
     return false;
@@ -228,10 +228,7 @@ int ZLAC8015D::set_control_gains_velocity(VelocityGains &gains){
   DBG("Successfully set velocity gains: " << "Left: Kp=" << gains.left.kp << " Ki=" << gains.left.ki << " Kf=" << gains.left.kf
             << " | Right: Kp=" << gains.right.kp << " Ki=" << gains.right.ki << " Kf=" << gains.right.kf);
   return 0;
-  }
-
-
-
+}
 
 int ZLAC8015D::set_control_gains_position(PositionGains &gains){
 
@@ -258,7 +255,7 @@ int ZLAC8015D::set_control_gains_position(PositionGains &gains){
   DBG("Successfully set position gains: " << "Left: Kp=" << gains.left.kp << " Kf=" << gains.left.kf
             << " | Right: Kp=" << gains.right.kp << " Kf=" << gains.right.kf);    
   return 0;
-  }
+}
 
 
 int ZLAC8015D::set_speed_resolution() {
