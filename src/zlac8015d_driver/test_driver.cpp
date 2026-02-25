@@ -6,18 +6,38 @@
 #include <atomic>
 
 static std::atomic_bool running{true};
-static void on_sigint(int) { running = false; }
+static void on_sigint(int) { 
+  running = false;
+  std::cout << "Stopped by Ctrl+C\n";
+}
 
-int main() {
+int main(int argc, char * argv[]) {
+
+  std::string port = "";
+  if (argc >= 2) {
+    port = argv[1];
+    // Validate if port exists
+    if (access(port.c_str(), F_OK) != 0) {
+      std::cerr << "Port " << port << " does not exist\n";
+      return 1;
+    }
+    std::cout << "Port: " << port << "\n";
+  }else{
+    std::cout << "No port specified\nUsage:\n$ ros2 run <package_name> <node_name> <port>";
+    return 1;
+  }
+
   std::signal(SIGINT, on_sigint);
 
-  ZLAC8015D driver("/dev/ttyUSB0", 115200, OperationMode::ABSOLUTE_POSITION);
+  ZLAC8015D driver(port, 115200, OperationMode::VELOCITY);
   if (!driver.connect()) return (std::cerr << "Failed to connect\n", 1);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
   driver.set_speed_resolution();
   driver.set_decel_time(3000); 
-  driver.set_accel_time(3000); 
+  driver.set_accel_time(3000);
+
+  std::cout << "\x1B[1;33m Motors will move ...\x1B[0m\n";
 
   while (running) {
     auto [l, r] = driver.get_error();
@@ -26,10 +46,11 @@ int main() {
       driver.reset_alarm();
       std::this_thread::sleep_for(std::chrono::milliseconds(3000));
       driver.enable_motor();
-      std::cout << "I'm Connect...\n";
+      std::cout << "Driver connected...\n";
     }
 
-    driver.set_sync_current(0.0, 0.0);
+    driver.set_sync_rpm(10, -10);
+
     auto [enc_left, enc_right] = driver.get_encoder_count();
     std::cout << "Encoder counts: Left: " << enc_left << " Right: " << enc_right << "\n";
 
@@ -44,7 +65,7 @@ int main() {
     std::string decoded_right = r;
 
     try {
-      int code_left = std::stoi(l, nullptr, 16);   // base 16, acepta "0x...."
+      int code_left = std::stoi(l, nullptr, 16);   // base 16, accepts "0x...."
       decoded_left = driver.decode_error(code_left, "left");
     } catch (...) {
 
@@ -63,8 +84,7 @@ int main() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
 
-  // Al salir con Ctrl+C: manda 0 para no dejar torque/corriente aplicada
+  driver.set_sync_rpm(0, 0);
   driver.disable_motor();
-  std::cout << "Stopped (Ctrl+C).\n";
   return 0;
 }
