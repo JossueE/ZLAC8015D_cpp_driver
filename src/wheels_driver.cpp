@@ -78,6 +78,11 @@ public:
     sub_cmd_vel_ = this->create_subscription<geometry_msgs::msg::Twist>(
       "cmd_vel_safe", 10, std::bind(&ZlacNode::command_vel_CB, this, std::placeholders::_1));
 
+    // ----------------------------------------------- Parameter Callback ------------------------------------------------
+
+    params_handler_ = this->add_on_set_parameters_callback(
+      std::bind(&ZlacNode::on_params_change, this, std::placeholders::_1));
+
     // ----------------------------------------- Initialization of Motor Control -----------------------------------------
 
     motors_ = ZLAC8015D(port_, 115200, OperationMode::VELOCITY);
@@ -86,7 +91,7 @@ public:
       RCLCPP_ERROR(rclcpp::get_logger(node_name), "Failed to connect to ZLAC8015D driver on port %s", port_.c_str());
       rclcpp::shutdown();
     } else {
-      RCLCPP_INFO(this->get_logger(), "Successfully connected to ZLAC8015D driver on port %s", port_.c_str());
+      RCLCPP_INFO(rclcpp::get_logger(node_name), "Successfully connected to ZLAC8015D driver on port %s", port_.c_str());
     }
 
     motors_.disable_motor();  // Disable the motor on startup for safety, the user can enable it later by calling connect() again.
@@ -121,7 +126,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_right_data_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
 
-  std_msgs::msg::Float64 msg_left_, msg_right_;
+  // Params Callback
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr params_handler_;
 
   bool wheelR_is_backward_;
   bool wheelL_is_backward_;
@@ -135,6 +141,51 @@ private:
   const std::string port_;
   ZLAC8015D motors_;
 
+  rcl_interfaces::msg::SetParametersResult on_params_change(const std::vector<rclcpp::Parameter> &params){
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    result.reason = "Param Accepted";
+
+    for (const auto & p : params) {
+      if (p.get_name() == "unlock_driver") {
+        if (p.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
+          result.successful = false;
+          result.reason = "unlock_driver must be bool (true/false)";
+          return result;
+        } 
+        unlock_driver_ = p.as_bool();
+        movement_lock_timer_->reset();
+        RCLCPP_INFO(rclcpp::get_logger(node_name), "unlock_driver setted as: %s", unlock_driver_ ? "true" : "false");
+      }
+
+      else if (p.get_name() == "accel_time_ms" || p.get_name() == "decel_time_ms"){
+        if (p.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER) {
+          result.successful = false;
+          result.reason = "accel_time_ms and decel_time_ms must be integer (0 to 16000)";
+          return result;
+        } 
+        int value = p.as_int();
+        if (value < 0 || value > 16000) {
+          result.successful = false;
+          result.reason = "accel_time_ms and decel_time_ms out of range (0 to 16000)";
+          return result;
+        }
+
+        if(p.get_name() == "accel_time_ms"){
+          accel_time_ms_ = static_cast<int>(value);
+          motors_.set_accel_time(accel_time_ms_);
+          RCLCPP_INFO(this->get_logger(), "accel_time_ms set as: %ld", static_cast<long>(value));
+        }
+
+        else if(p.get_name() == "decel_time_ms"){
+          decel_time_ms_ = static_cast<int>(value);
+          motors_.set_decel_time(decel_time_ms_);
+          RCLCPP_INFO(this->get_logger(), "decel_time_ms_ set as: %ld", static_cast<long>(value));
+        }
+      }
+    }
+    return result;
+  }
 
   void warning_handler(){
 
@@ -143,27 +194,27 @@ private:
     static int error_count{0};
 
     // For Future Improvements, all this information can be send with a personalized ROS2 message and publish in a Topic.
-    auto[count_left, count_right] = motors_.get_encoder_count();
+    auto[count_left, count_right, status_flag] = motors_.get_encoder_count();
     auto[rpm_left, rpm_right] = motors_.get_rpm();
     auto[current_left, current_right] = motors_.get_current(); 
     auto[temp_left, temp_right] = motors_.get_temperature();
     auto[error_msg_left, error_msg_right] = motors_.get_error();
 
     if ((error_msg_left != "0x0000") || (error_msg_right != "0x0000")){
-      RCLCPP_DEBUG(this->get_logger(), "[WARN_MON] The Handler for Errors is Activate");
+      RCLCPP_DEBUG(rclcpp::get_logger(node_name), "[WARN_MON] The Handler for Errors is Activate");
       error_handler(warned_overheat, warned_speedfail, error_count);
     };
 
     if (error_msg_left == "0x0000" && error_msg_right == "0x0000"){ 
       if (warned_speedfail && std::abs((double)rpm_left) < 2500 && std::abs((double)rpm_right) < 2500){
-        RCLCPP_INFO(this->get_logger(),"Speed back to normal. Resuming normal operation.");
+        RCLCPP_INFO(rclcpp::get_logger(node_name),"Speed back to normal. Resuming normal operation.");
         motors_.set_decel_time(decel_time_ms_);
         motors_.set_accel_time(accel_time_ms_);
         warned_speedfail = false;
       }
 
       if (warned_overheat && temp_left < 85 && temp_right < 85 ){
-        RCLCPP_INFO(this->get_logger(),"Temperature back to normal. Resuming normal operation.");
+        RCLCPP_INFO(rclcpp::get_logger(node_name),"Temperature back to normal. Resuming normal operation.");
         motors_.disable_parking_mode();
         warned_overheat = false;
       }
@@ -200,14 +251,16 @@ private:
 
     // If more than one publisher   
     const size_t pubs = count_publishers("cmd_vel_safe");
-    if (pubs > 1 || pubs == 0) {
-      RCLCPP_FATAL(rclcpp::get_logger(node_name), "More than one publisher or No publishers on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
-      motors_.set_decel_time(3000);
+    if (pubs > 1) {
+      RCLCPP_FATAL(rclcpp::get_logger(node_name), "More than one publisher on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
       motors_.set_sync_rpm(0,0);
       // Destroy node
       rclcpp::shutdown();
     }
-
+    else if (pubs == 0){
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "No publishers on cmd_vel_safe (%zu). Stopping robot and locking wheels for security.", pubs);
+      motors_.set_sync_rpm(0,0);
+    }
   }
 
   void error_handler(bool &warned_overheat, bool &warned_speedfail, int &error_count){
@@ -220,14 +273,14 @@ private:
       int code_left = std::stoi(error_msg_left, nullptr, 16);
       decoded_left = motors_.decode_error(code_left, "left");
     } catch (const std::exception &e) {
-      RCLCPP_WARN(this->get_logger(), "We cant recognize left error '%s': %s", error_msg_left.c_str(), e.what());
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "Left Error Can be Recognized '%s': %s", error_msg_left.c_str(), e.what());
     }
 
     try {
       int code_right = std::stoi(error_msg_right, nullptr, 16);
       decoded_right = motors_.decode_error(code_right, "right");
     } catch (const std::exception &e) {
-      RCLCPP_WARN(rclcpp::get_logger(node_name), "We cant recognize right error '%s': %s", error_msg_right.c_str(), e.what());
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "Right Error Can be Recognized '%s': %s", error_msg_right.c_str(), e.what());
     }
 
     RCLCPP_ERROR(rclcpp::get_logger(node_name), "Left motor error: %s", decoded_left.c_str());
@@ -235,7 +288,6 @@ private:
 
     // ------------------------- CRITICS: Immediately Stop -------------------------
     if (error_msg_left == "0x0800" || error_msg_right == "0x0800" ||   // Encoder Error
-        error_msg_left == "0x0020" || error_msg_right == "0x0020" ||   // Encoder Value out of Tolerance
         error_msg_left == "0x0080" || error_msg_right == "0x0080" ||   // Reference Voltage Error
         error_msg_left == "0x0200" || error_msg_right == "0x0200")     // Hall Error
     {
@@ -249,6 +301,7 @@ private:
         error_msg_left == "0x0002" || error_msg_right == "0x0002" ||   // Under Voltage Error
         error_msg_left == "0x0004" || error_msg_right == "0x0004" ||   // Overcurrent Fault 
         error_msg_left == "0x0008" || error_msg_right == "0x0008" ||   // Motor Overload Fault
+        error_msg_left == "0x0020" || error_msg_right == "0x0020" ||   // // Encoder Value out of Tolerance
         error_msg_left == "0x0100" || error_msg_right == "0x0100" )    // EEPROM Read and Write Error    
     {
       error_count++;
@@ -267,11 +320,11 @@ private:
       warned_speedfail = true;
       auto[rpm_left, rpm_right] = motors_.get_rpm();
       if (rpm_left > 2500 || rpm_right > 2500){
-        RCLCPP_WARN(this->get_logger(),"Too high speed detected in ZLAC8015D driver. RPM Left:  %.1f, RPM Right:  %.1f", rpm_left, rpm_right);
+        RCLCPP_WARN(rclcpp::get_logger(node_name),"Too high speed detected in ZLAC8015D driver. RPM Left:  %.1f, RPM Right:  %.1f", rpm_left, rpm_right);
         motors_.set_decel_time(3000);
         motors_.set_accel_time(3000);
         motors_.set_sync_rpm(1000.0, 1000.0); // Position 1000 RPM // Velocity 3000 RPM
-        RCLCPP_WARN(this->get_logger(), "For security the speed is set to 100 RPM, Acceleration and deceleration set to 16 seconds");
+        RCLCPP_WARN(rclcpp::get_logger(node_name), "For security the speed is set to 100 RPM, Acceleration and deceleration set to 16 seconds");
       }
     }
 
@@ -291,13 +344,19 @@ private:
   }
 
   void wheel_ticks_timer(){
-    auto [count_left, count_right] = motors_.get_encoder_count();
 
-    msg_left_.data  = static_cast<double>(count_left);
-    msg_right_.data = static_cast<double>(count_right);
+    std_msgs::msg::Float64 msg_left_, msg_right_;
+    auto [count_left, count_right, status_flag] = motors_.get_encoder_count();
+    if (!status_flag){
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "A problem is detected reading the Encoder Count, this value is going to be jumped");
+    }
+    else{
+      msg_left_.data  = static_cast<double>(count_left);
+      msg_right_.data = static_cast<double>(count_right);
 
-    pub_left_data_->publish(msg_left_);
-    pub_right_data_->publish(msg_right_);
+      pub_left_data_->publish(msg_left_);
+      pub_right_data_->publish(msg_right_);
+    }
   }
   
   void command_vel_CB(const geometry_msgs::msg::Twist::SharedPtr msg){
@@ -306,7 +365,7 @@ private:
     const double vx = msg->linear.x;
     const double wz = msg->angular.z;
 
-    // RCLCPP_DEBUG(this->get_logger(), "Angular Speed:  %.1f, Linear Speed:  %.1f", wz, vx);
+    RCLCPP_DEBUG(rclcpp::get_logger(node_name), "Angular Speed:  %.1f, Linear Speed:  %.1f", wz, vx);
 
     if(vx == 0.0 && wz == 0.0){
       if(!flag){
@@ -324,7 +383,7 @@ private:
     }
 
     auto [rpm_l, rpm_r] = twist_to_rpm(vx, wz);
-    // RCLCPP_DEBUG(this->get_logger(), "Publish Speed RPM LEFT:  %.1f, RIGHT:  %.1f", rpm_l, rpm_r);
+    RCLCPP_DEBUG(rclcpp::get_logger(node_name), "Publish Speed RPM LEFT:  %.1f, RIGHT:  %.1f", rpm_l, rpm_r);
 
     motors_.set_sync_rpm(rpm_l, rpm_r);
   }
@@ -332,11 +391,12 @@ private:
   void movement_lock_timer(){
     
     if(!unlock_driver_){
-      RCLCPP_DEBUG(this->get_logger(), "Driver locked, not free wheels enable");
+      motors_.enable_motor();
+      RCLCPP_DEBUG(rclcpp::get_logger(node_name), "Driver locked, not free wheels enable");
     }
     else{
       motors_.disable_motor();
-      RCLCPP_DEBUG(this->get_logger(), "Driver unlocked");
+      RCLCPP_DEBUG(rclcpp::get_logger(node_name), "Driver unlocked");
     }
     motors_.enable_parking_mode();
     movement_lock_timer_->cancel();

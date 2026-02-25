@@ -120,6 +120,13 @@ enum class OperationMode {
   TORQUE
 };	
 
+// ------------------------------------ To Read Encoder ------------------------------------
+
+struct GetEncoder { 
+	int32_t left, right;
+	bool status;
+};
+
 // ---------------------------- Overload to Print Operation Mode ----------------------------
 
 inline std::ostream& operator<<(std::ostream& os, const OperationMode& m) {
@@ -207,9 +214,9 @@ public:
 // ---------------------------------------- Encoder -----------------------------------------
 	/**
    	 * @brief Read left and right motor encoder counts.
-   	 * @return encoder_count_left and encoder_count_right on success, -1 on error (not connected, Modbus failure).
+   	 * @return GetEncoder struct, If read process is incorrect return {-1, -1, false}, else {int32 left, int32 right, true} 
    	*/
-	std::pair<int32_t, int32_t> get_encoder_count();
+	GetEncoder get_encoder_count();
 
 // --------------------------- Control Gains Velocity - Position  ---------------------------
 	/**

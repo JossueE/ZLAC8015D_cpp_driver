@@ -51,8 +51,12 @@ int main(int argc, char * argv[]) {
 
     driver.set_sync_rpm(10, -10);
 
-    auto [enc_left, enc_right] = driver.get_encoder_count();
-    std::cout << "Encoder counts: Left: " << enc_left << " Right: " << enc_right << "\n";
+    auto [enc_left, enc_right, status_flag] = driver.get_encoder_count();
+    if(status_flag){
+      std::cout << "Encoder counts: Left: " << enc_left << " Right: " << enc_right << "\n";
+    } else {
+      std::cout << "\x1B[1;33m A problem reading driver is detected \x1B[0m\n";
+    }
 
     auto [temp_left, temp_right] = driver.get_temperature();
     std::cout << "Temperatures: Left: " << temp_left << "°C Right: " << temp_right << "°C\n";

@@ -105,9 +105,12 @@ int ZLAC8015D::set_mode() {
 }
 
 
-std::pair<int32_t, int32_t> ZLAC8015D::get_encoder_count(){
+GetEncoder ZLAC8015D::get_encoder_count() {
+  GetEncoder enc{-1, -1, false};
 
-  if (!client_) return {-1, -1};
+  if (!client_) {
+    return enc;
+  } 
 
   uint16_t L[2] = {0, 0};
   uint16_t R[2] = {0, 0};
@@ -117,15 +120,20 @@ std::pair<int32_t, int32_t> ZLAC8015D::get_encoder_count(){
 
   if (rc_l == -1 || rc_r == -1) {
     std::cerr << "get_encoder_count failed: " << modbus_strerror(errno) << std::endl;
-    return {-1, -1};
+    return enc;
   }
 
-  int32_t left_count  = (static_cast<int32_t>(L[0]) << 16) | L[1];
-  int32_t right_count = (static_cast<int32_t>(R[0]) << 16) | R[1];
+  uint32_t left_u  = (static_cast<uint32_t>(L[0]) << 16) | static_cast<uint32_t>(L[1]);
+  uint32_t right_u = (static_cast<uint32_t>(R[0]) << 16) | static_cast<uint32_t>(R[1]);
 
-  DBG("Encoder counts: Left: " << left_count << " Right: " << right_count);
-  return {left_count, right_count};
-} 
+  enc.left = static_cast<int32_t>(left_u);
+  enc.right = static_cast<int32_t>(right_u);
+  enc.status = true;
+
+  DBG("Encoder counts: Left: " << enc.left << " Right: " << enc.right);
+
+  return enc;
+}
 
 std::optional<VelocityGains> ZLAC8015D::get_control_gains_velocity(){
 
@@ -342,15 +350,22 @@ int ZLAC8015D::set_sync_rpm(float L_rpm, float R_rpm) {
 
 std::pair<float, float> ZLAC8015D::get_rpm(){
 
-  if (!client_) return {-1, -1};
-  uint16_t rpm[2];
-  int rc = modbus_read_registers(client_, GET_RPM, 2, rpm);
-  if (rc == -1) {
+  if (!client_) return {-1.0f, -1.0f};
+  uint16_t raw[2];
+  int rc = modbus_read_registers(client_, GET_RPM, 2, raw);
+  if (rc != 2) {
     std::cerr << "get_rpm failed: " << modbus_strerror(errno) << std::endl;
-    return {-1, -1};
+    return {-1.0f, -1.0f};
   }
-  DBG("Current RPM: Left: " << rpm[0] * 0.1f << " Right: " << rpm[1] * 0.1f);
-  return { static_cast<float>(rpm[0]) * 0.1f, static_cast<float>(rpm[1]) * 0.1f };
+
+  int16_t left_raw  = static_cast<int16_t>(raw[0]);
+  int16_t right_raw = static_cast<int16_t>(raw[1]);
+
+  float left_rpm  = static_cast<float>(left_raw) * 0.1f;
+  float right_rpm = static_cast<float>(right_raw) * 0.1f;
+
+  DBG("Current RPM: Left: " << left_rpm << " Right: " << right_rpm);
+  return {left_rpm, right_rpm};
 }
 
 int ZLAC8015D::set_max_speed_position_mode(int16_t L_rpm, int16_t R_rpm){
