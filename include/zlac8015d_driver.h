@@ -209,7 +209,11 @@ public:
   	*/	
 	int change_mode(OperationMode mode);
 	
-
+	/**
+  	 * @brief Save to EEPROM
+  	 * @return -1 if no active connection, or if the emergency stop command fails; 0 on success. Print the mode to change.
+  	*/
+	int save_to_eeprom();
 
 // ---------------------------------------- Encoder -----------------------------------------
 	/**

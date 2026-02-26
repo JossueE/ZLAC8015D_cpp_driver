@@ -35,10 +35,11 @@ int main(int argc, char * argv[]) {
 
   if(driver.get_speed_resolution() != "0.1 RPM"){
       driver.set_sync_rpm(0, 0);
-    driver.disable_motor();
-    
+      driver.disable_motor();
+
     if(driver.set_speed_resolution() == 0){
       std::cerr << "\033[31m" << "0.1RPM Resolution Successfully Setted --- Driver Must need Restarting\n" << "\033[0m";
+      driver.save_to_eeprom();
       return 1;
     }
 

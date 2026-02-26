@@ -270,6 +270,7 @@ int ZLAC8015D::set_speed_resolution() {
 
   if (!client_) return -1;
   if (modbus_write_register(client_, SET_SPEED_RESOLUTION, RPM_RES_CERO_POINT_ONE) == -1) return -1; 
+
   std::cerr << "Remember to Restart the system to make effective the changes\n";
   return 0;
 }
@@ -286,6 +287,14 @@ std::string ZLAC8015D::get_speed_resolution() {
   std::string res_str = (val == RPM_RES_CERO_POINT_ONE) ? "0.1 RPM" : (val == RPM_RES_ONE) ? "1 RPM" : "Unknown";
   DBG("Current speed resolution: " << res_str);
   return res_str;
+}
+
+int ZLAC8015D::save_to_eeprom(){
+
+  if (!client_) return -1;
+  if (modbus_write_register(client_, SAVE_EEPROM, 0x0001) == -1) return -1;
+  std::cerr << "Values saved to EEPROM Remember to Restart the system to make effective the changes\n";
+  return 0;
 }
 
 
