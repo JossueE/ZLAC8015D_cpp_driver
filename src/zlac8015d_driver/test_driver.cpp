@@ -33,7 +33,16 @@ int main(int argc, char * argv[]) {
   if (!driver.connect()) return (std::cerr << "Failed to connect\n", 1);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-  driver.set_speed_resolution();
+  if(driver.get_speed_resolution() != "0.1 RPM"){
+    driver.set_speed_resolution();
+    driver.set_sync_rpm(0, 0);
+    driver.disable_motor();
+    std::cerr << "\033[31m"
+          << "ERROR: Driver must be Restarted. RPM resolution different than 0.1 RPM\n"
+          << "\033[0m";
+    return 1;
+  }
+
   driver.set_decel_time(3000); 
   driver.set_accel_time(3000);
 
@@ -61,9 +70,14 @@ int main(int argc, char * argv[]) {
     auto [temp_left, temp_right] = driver.get_temperature();
     std::cout << "Temperatures: Left: " << temp_left << "°C Right: " << temp_right << "°C\n";
 
-    driver.get_software_version();
-    driver.get_current();
-    driver.get_rpm();
+    std::string software_version = driver.get_software_version();
+    std::cout << "Software Version: " << software_version << "\n";
+
+    auto [current_left, current_right] = driver.get_current();
+    std::cout << "Current: Left: " << current_left << "mA Right: " << current_right << "ma\n";
+
+    auto [left_rpm, right_rpm] = driver.get_rpm();
+    std::cout << "RPM: Left: " << left_rpm << " Right: " << right_rpm << "\n"; 
 
     std::string decoded_left = l;
     std::string decoded_right = r;
