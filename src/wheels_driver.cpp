@@ -27,21 +27,21 @@ public:
 
     // Acceleration and deceleration time for velocity control mode. 
     // The driver can receive accel for left and right wheel separately.
-    this->declare_parameter<int>("accel_time_ms", 3000);
-    this->declare_parameter<int>("decel_time_ms", 3000);  
+    this->declare_parameter<int>("accel_time_ms", 10);
+    this->declare_parameter<int>("decel_time_ms", 10);  
 
-    //Driver Movement Lock
+    // Driver Movement Lock
+    // If "unlock_driver" == true, after "time_disabled_driver_s":
+    //     The wheels are going to be unlocked and current is going to be limited to 3A.
+    // If If "unlock_driver" == false, after "time_disabled_driver_s":
+    //     The wheels are going to be locked and current is going to be limited to 3A.
     this->declare_parameter<bool>("unlock_driver", true); 
     this->declare_parameter<double>("time_disabled_driver_s", 3.0f);
 
     // PID gains for velocity control mode
-    this->declare_parameter<int>("VelocityGains.left.kp", 60);
-    this->declare_parameter<int>("VelocityGains.left.ki", 20);
-    this->declare_parameter<int>("VelocityGains.left.kf", 10);
-    this->declare_parameter<int>("VelocityGains.right.kp", 60);
-    this->declare_parameter<int>("VelocityGains.right.ki", 20);
-    this->declare_parameter<int>("VelocityGains.right.kf", 10);
-
+    this->declare_parameter<std::vector<int64_t>>("left_velocity_gains",std::vector<int64_t>{80, 30, 15});
+    this->declare_parameter<std::vector<int64_t>>("right_velocity_gains",std::vector<int64_t>{80, 30, 15});
+    
     // Wheels configuration parameters
     wheelR_is_backward_ = this->get_parameter("wheelR_is_backward").as_bool();
     wheelL_is_backward_ = this->get_parameter("wheelL_is_backward").as_bool();
@@ -57,12 +57,15 @@ public:
     time_disabled_driver_s_ = get_parameter("time_disabled_driver_s").as_double();
 
     // PID gains for velocity control mode
-    velocity_gains_.left.kp = this->get_parameter("VelocityGains.left.kp").as_int();
-    velocity_gains_.left.ki = this->get_parameter("VelocityGains.left.ki").as_int();
-    velocity_gains_.left.kf = this->get_parameter("VelocityGains.left.kf").as_int();
-    velocity_gains_.right.kp = this->get_parameter("VelocityGains.right.kp").as_int();
-    velocity_gains_.right.ki = this->get_parameter("VelocityGains.right.ki").as_int();
-    velocity_gains_.right.kf = this->get_parameter("VelocityGains.right.kf").as_int();
+    auto v_l = this->get_parameter("left_velocity_gains").as_integer_array();
+    auto v_r = this->get_parameter("right_velocity_gains").as_integer_array(); 
+
+    velocity_gains_.left.kp = static_cast<int16_t>(v_l[0]);
+    velocity_gains_.left.ki = static_cast<int16_t>(v_l[1]);
+    velocity_gains_.left.kf = static_cast<int16_t>(v_l[2]);
+    velocity_gains_.right.kp = static_cast<int16_t>(v_r[0]);
+    velocity_gains_.right.ki = static_cast<int16_t>(v_r[1]);
+    velocity_gains_.right.kf = static_cast<int16_t>(v_r[2]);
 
     // -------------------------------------- Timers to Manage the Driver Control ----------------------------------------
     warning_timer_ = this->create_wall_timer(1000ms, std::bind(&ZlacNode::warning_handler, this));
@@ -110,7 +113,17 @@ public:
     // Enable the motor after set initial speed
     motors_.enable_motor();
 
-    RCLCPP_INFO(get_logger(), "Node initialized");
+    RCLCPP_INFO(rclcpp::get_logger(node_name), "Node initialized");
+  }
+
+  ~ZlacNode() override {
+    try {
+      motors_.set_decel_time(3000);
+      motors_.set_accel_time(3000);
+      motors_.emergency_stop();
+    } catch (...) {
+      RCLCPP_ERROR(rclcpp::get_logger(node_name), "Error launching emergency stop when the node was destructed");
+    }
   }
 
 private:
@@ -293,6 +306,8 @@ private:
     {
       RCLCPP_FATAL(rclcpp::get_logger(node_name), "Critical error detected in ZLAC8015D driver. Emergency stop + shutdown.");
       motors_.emergency_stop();
+      motors_.set_decel_time(3000);
+      motors_.set_accel_time(3000);
       rclcpp::shutdown();
     }
 
@@ -308,6 +323,8 @@ private:
 
       if (error_count >= 5) {
         RCLCPP_ERROR(rclcpp::get_logger(node_name),"ZLAC error detected %d times, shutting down to prevent damage.", error_count);
+        motors_.set_decel_time(3000);
+        motors_.set_accel_time(3000);
         motors_.emergency_stop(); // The wheels are going to be locked
         rclcpp::shutdown();
       }

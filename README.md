@@ -3,6 +3,14 @@
 
 This package provides a C++ driver and ROS2 node for controlling the ZLAC8015D dual-motor controller via Modbus RTU over serial communication.
 
+## Wiring Diagram
+
+<figure style="margin:0; text-align:center; border:1px solid #eaecef; padding:6px; border-radius:6px;">
+  <img src="images/wiring_diagram.png"
+       alt="Wiring Diagram"
+       style="max-width:100%; height:auto;" />
+</figure>
+
 ## Package Structure
 
 - **Driver Library** (`zlac8015d_driver.h/cpp`): Standalone Modbus RTU interface to the ZLAC8015D hardware
@@ -91,5 +99,9 @@ ros2 run zlac8015d_driver2_cpp wheels_driver /dev/ttyUSB0 \
     -p wheel_radius:=0.1 \
     -p wheels_separation:=0.4 \
     -p accel_time_ms:=3000 \
-    -p VelocityGains.left.kp:=60
+    -p VelocityGains.left.kp:=60 
+
+# You can set more values, pleas check the node as reference
 ```
+
+
