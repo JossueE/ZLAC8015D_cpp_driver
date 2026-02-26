@@ -34,11 +34,16 @@ int main(int argc, char * argv[]) {
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
   if(driver.get_speed_resolution() != "0.1 RPM"){
-    driver.set_speed_resolution();
-    driver.set_sync_rpm(0, 0);
+      driver.set_sync_rpm(0, 0);
     driver.disable_motor();
+    
+    if(driver.set_speed_resolution() == 0){
+      std::cerr << "\033[31m" << "0.1RPM Resolution Successfully Setted --- Driver Must need Restarting\n" << "\033[0m";
+      return 1;
+    }
+
     std::cerr << "\033[31m"
-          << "ERROR: Driver must be Restarted. RPM resolution different than 0.1 RPM\n"
+          << "ERROR: RPM resolution different than 0.1 RPM and problems setting it\n"
           << "\033[0m";
     return 1;
   }
