@@ -41,6 +41,11 @@ public:
     // PID gains for velocity control mode
     this->declare_parameter<std::vector<int64_t>>("left_velocity_gains",std::vector<int64_t>{80, 30, 15});
     this->declare_parameter<std::vector<int64_t>>("right_velocity_gains",std::vector<int64_t>{80, 30, 15});
+
+    // Resolution Mode
+    // TRUE == 0.1 RPM
+    // FALSE == 1.0 RPM
+    this->declare_parameter<bool>("resolution_mode", false);
     
     // Wheels configuration parameters
     wheelR_is_backward_ = this->get_parameter("wheelR_is_backward").as_bool();
@@ -66,6 +71,11 @@ public:
     velocity_gains_.right.kp = static_cast<int16_t>(v_r[0]);
     velocity_gains_.right.ki = static_cast<int16_t>(v_r[1]);
     velocity_gains_.right.kf = static_cast<int16_t>(v_r[2]);
+
+    // Resolution Mode
+    
+    bool resolution_mode_flag = this->get_parameter("resolution_mode").as_bool();
+    resolution_mode_ = resolution_mode_flag ? ResolutionMode::CERO_POINT_ONE_RPM : ResolutionMode::ONE_RPM;
 
     // -------------------------------------- Timers to Manage the Driver Control ----------------------------------------
     warning_timer_ = this->create_wall_timer(1000ms, std::bind(&ZlacNode::warning_handler, this));
@@ -106,9 +116,15 @@ public:
     // Set the PID gains for velocity control mode
     motors_.set_control_gains_velocity(velocity_gains_);
 
+    // Check Resolution Setted
+    if (motors_.get_speed_resolution() != resolution_mode_){
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "The resolution_mode setted is different that resolution mode configured in the driver \n    - For security driver will move at 1RPM");
+      resolution_mode_ = ResolutionMode::ONE_RPM;
+    }
+
     // We set the RPM before enabling the motor, after disable motor, the wheels are going to be Free. 
     // But the motor isn't start the movement until enable, we set before to make sure that the value is properly setted.
-    motors_.set_sync_rpm(0.0, 0.0);
+    motors_.set_sync_rpm(0.0, 0.0, resolution_mode_);
 
     // Enable the motor after set initial speed
     motors_.enable_motor();
@@ -151,6 +167,7 @@ private:
   bool unlock_driver_;
   double time_disabled_driver_s_;
   VelocityGains velocity_gains_;  
+  ResolutionMode resolution_mode_;
   const std::string port_;
   ZLAC8015D motors_;
 
@@ -195,6 +212,18 @@ private:
           motors_.set_decel_time(decel_time_ms_);
           RCLCPP_INFO(this->get_logger(), "decel_time_ms_ set as: %ld", static_cast<long>(value));
         }
+      }
+
+      else if (p.get_name() == "resolution_mode") {
+        if (p.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
+          result.successful = false;
+          result.reason = "resolution_mode must be bool (true/false)";
+          return result;
+        } 
+        bool resolution_mode_flag = p.as_bool();
+        resolution_mode_ = resolution_mode_flag ? ResolutionMode::CERO_POINT_ONE_RPM : ResolutionMode::ONE_RPM;
+        movement_lock_timer_->reset();
+        RCLCPP_INFO(rclcpp::get_logger(node_name), "resolution_mode setted as: %s", resolution_mode_flag ? "0.1RPM" : "1RPM");
       }
     }
     return result;
@@ -266,13 +295,13 @@ private:
     const size_t pubs = count_publishers("cmd_vel_safe");
     if (pubs > 1) {
       RCLCPP_FATAL(rclcpp::get_logger(node_name), "More than one publisher on cmd_vel_safe (%zu). Stopping robot and shutting down.", pubs);
-      motors_.set_sync_rpm(0,0);
+      motors_.set_sync_rpm(0,0, resolution_mode_);
       // Destroy node
       rclcpp::shutdown();
     }
     else if (pubs == 0){
       RCLCPP_WARN(rclcpp::get_logger(node_name), "No publishers on cmd_vel_safe (%zu). Stopping robot and locking wheels for security.", pubs);
-      motors_.set_sync_rpm(0,0);
+      motors_.set_sync_rpm(0,0, resolution_mode_);
     }
   }
 
@@ -340,7 +369,7 @@ private:
         RCLCPP_WARN(rclcpp::get_logger(node_name),"Too high speed detected in ZLAC8015D driver. RPM Left:  %.1f, RPM Right:  %.1f", rpm_left, rpm_right);
         motors_.set_decel_time(3000);
         motors_.set_accel_time(3000);
-        motors_.set_sync_rpm(1000.0, 1000.0); // Position 1000 RPM // Velocity 3000 RPM
+        motors_.set_sync_rpm(1000.0, 1000.0, resolution_mode_); // Position 1000 RPM // Velocity 3000 RPM
         RCLCPP_WARN(rclcpp::get_logger(node_name), "For security the speed is set to 100 RPM, Acceleration and deceleration set to 16 seconds");
       }
     }
@@ -402,7 +431,7 @@ private:
     auto [rpm_l, rpm_r] = twist_to_rpm(vx, wz);
     RCLCPP_DEBUG(rclcpp::get_logger(node_name), "Publish Speed RPM LEFT:  %.1f, RIGHT:  %.1f", rpm_l, rpm_r);
 
-    motors_.set_sync_rpm(rpm_l, rpm_r);
+    motors_.set_sync_rpm(rpm_l, rpm_r, resolution_mode_);
   }
 
   void movement_lock_timer(){

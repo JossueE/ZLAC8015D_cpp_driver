@@ -266,27 +266,30 @@ int ZLAC8015D::set_control_gains_position(PositionGains &gains){
 }
 
 
-int ZLAC8015D::set_speed_resolution() {
+int ZLAC8015D::set_speed_resolution(const ResolutionMode &mode) {
 
   if (!client_) return -1;
-  if (modbus_write_register(client_, SET_SPEED_RESOLUTION, RPM_RES_CERO_POINT_ONE) == -1) return -1; 
-
+  if (mode == ResolutionMode::CERO_POINT_ONE_RPM){
+    if (modbus_write_register(client_, SET_SPEED_RESOLUTION, RPM_RES_CERO_POINT_ONE) == -1) return -1; 
+  }
+  if (mode == ResolutionMode::ONE_RPM || mode == ResolutionMode::UNKNOWN){
+    if (modbus_write_register(client_, SET_SPEED_RESOLUTION, RPM_RES_ONE) == -1) return -1; 
+    if(mode == ResolutionMode::UNKNOWN){
+      std::cerr << "The Value wasn't possible to be assigned - 1 RPM setted \n";
+    }
+  }
   std::cerr << "Remember to Restart the system to make effective the changes\n";
   return 0;
 }
 
-std::string ZLAC8015D::get_speed_resolution() {
-
-  if (!client_) return "Unknown";
-  uint16_t val;
-  if (modbus_read_registers(client_, SET_SPEED_RESOLUTION, 1, &val) != 1) {
-    std::cerr << "get_speed_resolution failed: " << modbus_strerror(errno) << std::endl;
-    return "Unknown";
-  }
-
-  std::string res_str = (val == RPM_RES_CERO_POINT_ONE) ? "0.1 RPM" : (val == RPM_RES_ONE) ? "1 RPM" : "Unknown";
-  DBG("Current speed resolution: " << res_str);
-  return res_str;
+ResolutionMode ZLAC8015D::get_speed_resolution() {
+  if (!client_) return ResolutionMode::UNKNOWN;
+  uint16_t val{0}; 
+  if(modbus_read_registers(client_, SET_SPEED_RESOLUTION, 1, &val)== -1) return ResolutionMode::UNKNOWN;
+  ResolutionMode mode = ResolutionMode::UNKNOWN;
+  if (val == RPM_RES_CERO_POINT_ONE) mode = ResolutionMode::CERO_POINT_ONE_RPM;
+  else if (val == RPM_RES_ONE) mode = ResolutionMode::ONE_RPM;
+  return mode;
 }
 
 int ZLAC8015D::save_to_eeprom(){
@@ -298,60 +301,49 @@ int ZLAC8015D::save_to_eeprom(){
 }
 
 
-int ZLAC8015D::set_sync_rpm(float L_rpm, float R_rpm) {
+int ZLAC8015D::set_sync_rpm(float L_rpm, float R_rpm, const ResolutionMode &mode) {
 
   if (!client_) return -1;
 
   if (mode_ != OperationMode::VELOCITY) {
     DBG("To set RPM you have to be in velocity mode and you are in " << mode_ << "\n");
     DBG("For security we change your mode to Velocity\n");
-    if (change_mode(OperationMode::VELOCITY) != 0) return -1; 
+    if (change_mode(OperationMode::VELOCITY) != 0) return -1;
   }
 
-  std::string res = get_speed_resolution();
-  if (res == "Unknown") {
-    std::cerr
-      << "Failed to get speed resolution\n"
-      << " - Remember to set the speed resolution with set_speed_resolution() before setting the RPM\n"
-      << " - And restart the system to make effective the changes\n";
-    return -1;
+  const float step_rpm = (mode == ResolutionMode::CERO_POINT_ONE_RPM) ? 0.1f : 1.0f;
+  constexpr float MAX_RPM = 3000.0f;
+
+  if (L_rpm < -MAX_RPM || L_rpm > MAX_RPM || R_rpm < -MAX_RPM || R_rpm > MAX_RPM) {
+    std::cerr << "\033[31m"
+              << "RPM must be between -" << MAX_RPM << " and " << MAX_RPM << "\n"
+              << "\033[0m";
+    L_rpm = std::clamp(L_rpm, -MAX_RPM, MAX_RPM);
+    R_rpm = std::clamp(R_rpm, -MAX_RPM, MAX_RPM);
   }
 
-  if (res == "1 RPM") {
-    std::cerr
-      << "It looks like you have setted 1 RPM in config\n"
-      << " - Remember to set the speed resolution with set_speed_resolution() before setting the RPM\n"
-      << " - And restart the system to make effective the changes\n";
-    return -1;
-  }
-
-  L_rpm = std::round(L_rpm * 10.0f);
-  R_rpm = std::round(R_rpm * 10.0f);
-
-  if (L_rpm < -30000.0f || L_rpm > 30000.0f || R_rpm < -30000.0f || R_rpm > 30000.0f) {
-    std::cerr << "RPM must be between -3000.0 and 3000.0\n";
-    L_rpm = std::clamp<float>(L_rpm, -30000.0f, 30000.0f);
-    R_rpm = std::clamp<float>(R_rpm, -30000.0f, 30000.0f);
-  }
-
-  uint16_t regs[2]{0, 0};           
-  int32_t l_units = static_cast<int32_t>(L_rpm);
-  int32_t r_units = static_cast<int32_t>(R_rpm);
+  int32_t l_units = static_cast<int32_t>(std::lround(L_rpm / step_rpm));
+  int32_t r_units = static_cast<int32_t>(std::lround(R_rpm / step_rpm));
 
   l_units = std::clamp<int32_t>(l_units, -32768, 32767);
   r_units = std::clamp<int32_t>(r_units, -32768, 32767);
 
+  uint16_t regs[2];
   regs[0] = static_cast<uint16_t>(static_cast<int16_t>(l_units));
   regs[1] = static_cast<uint16_t>(static_cast<int16_t>(r_units));
 
-
-  int rc = modbus_write_registers(client_, SET_RPM, 2, regs); // SET_RPM debe ser 0x2088
+  // SET_RPM = 0x2088
+  int rc = modbus_write_registers(client_, SET_RPM, 2, regs);
   if (rc == -1) {
-    std::cerr << "set_sync_rpm failed: " << modbus_strerror(errno) << "\n";
+    std::cerr << "\033[31m"
+              << "set_sync_rpm failed: " << modbus_strerror(errno) << "\n"
+              << "\033[0m";
     return -1;
   }
 
-  DBG("Set RPM: Left: " << L_rpm * 0.1f << " Right: " << R_rpm * 0.1f);
+  DBG("Set RPM (cmd): Left=" << L_rpm << " Right=" << R_rpm
+      << " | raw units: L=" << l_units << " R=" << r_units
+      << " | step=" << step_rpm << " RPM/unit\n");
 
   return 0;
 }

@@ -120,6 +120,12 @@ enum class OperationMode {
   TORQUE
 };	
 
+enum class ResolutionMode {
+	ONE_RPM,
+	CERO_POINT_ONE_RPM,
+	UNKNOWN
+};
+
 // ------------------------------------ To Read Encoder ------------------------------------
 
 struct GetEncoder { 
@@ -261,13 +267,13 @@ public:
    	 * @brief Set the speed resolution for velocity mode.
    	 * @return 0 on success, -1 on error (not connected, Modbus failure).
    	*/
-	int set_speed_resolution();
+	int set_speed_resolution(const ResolutionMode &Mode);
 
 	/**
    	 * @brief Get the current speed resolution for velocity mode.
    	 * @return "0.1 RPM" or "1 RPM" on success, empty string on error (not connected, Modbus failure).
    	*/
-	std::string get_speed_resolution();
+	ResolutionMode get_speed_resolution();
 
 	/**
    	 * @brief Set the target speed for both motors in velocity mode.
@@ -276,7 +282,7 @@ public:
    	 * @return 0 on success, -1 on error (not connected, Modbus failure, invalid mode, or invalid speed resolution).
 	 * @note Every param is going to be round to the nearest 0.1 RPM. 
    	*/
-	int set_sync_rpm(float L_rpm, float R_rpm); 
+	int set_sync_rpm(float L_rpm, float R_rpm, const ResolutionMode &mode); 
 
 	/**
    	 * @brief Read left and right motor actual speed

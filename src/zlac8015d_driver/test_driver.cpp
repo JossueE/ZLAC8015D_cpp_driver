@@ -33,17 +33,18 @@ int main(int argc, char * argv[]) {
   if (!driver.connect()) return (std::cerr << "Failed to connect\n", 1);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-  if(driver.get_speed_resolution() != "0.1 RPM"){
-      driver.set_sync_rpm(0, 0);
-      driver.disable_motor();
+  if(driver.get_speed_resolution() != ResolutionMode::CERO_POINT_ONE_RPM){
+      driver.set_sync_rpm(0, 0, ResolutionMode::ONE_RPM);
+      driver.enable_motor();
 
-    if(driver.set_speed_resolution() == 0){
-      std::cerr << "\033[31m" << "0.1RPM Resolution Successfully Setted --- Driver Must need Restarting\n" << "\033[0m";
+    if(driver.set_speed_resolution(ResolutionMode::CERO_POINT_ONE_RPM) == 0){
+      std::cerr << "\033[31m" << "0.1RPM Resolution Successfully Setted\n" << "\033[0m";
       if(driver.save_to_eeprom() == -1){
         std::cerr << "\033[31m" << "ERROR saving in EEPROM Memory\n" << "\033[0m";
         return 1;
       }
-      std::cerr << "\033[31m" << "Driver Must need Restarting\n" << "\033[0m";
+      std::cerr << "\033[31m" << "Driver Must need to be Restarting\n" << "\033[0m";
+      std::cerr << "\033[31m" << "Only is possible for some ZLAC8015D, be careful after running it at a second time\n" << "\033[0m";
       return 1;
     }
 
@@ -68,7 +69,7 @@ int main(int argc, char * argv[]) {
       std::cout << "Driver connected...\n";
     }
 
-    driver.set_sync_rpm(10, -10);
+    driver.set_sync_rpm(10, -10, ResolutionMode::ONE_RPM);
 
     auto [enc_left, enc_right, status_flag] = driver.get_encoder_count();
     if(status_flag){
@@ -112,7 +113,7 @@ int main(int argc, char * argv[]) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
 
-  driver.set_sync_rpm(0, 0);
+  driver.set_sync_rpm(0, 0, ResolutionMode::ONE_RPM);
   driver.disable_motor();
   return 0;
 }

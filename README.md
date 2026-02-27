@@ -6,7 +6,7 @@ This package provides a C++ driver and ROS2 node for controlling the ZLAC8015D d
 ## Wiring Diagram
 
 <figure style="margin:0; text-align:center; border:1px solid #eaecef; padding:6px; border-radius:6px;">
-  <img src="images/wiring_diagram.png"
+  <img src="docs/wiring_diagram.png"
        alt="Wiring Diagram"
        style="max-width:100%; height:auto;" />
 </figure>
