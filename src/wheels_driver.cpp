@@ -222,6 +222,10 @@ private:
         } 
         bool resolution_mode_flag = p.as_bool();
         resolution_mode_ = resolution_mode_flag ? ResolutionMode::CERO_POINT_ONE_RPM : ResolutionMode::ONE_RPM;
+        if (motors_.get_speed_resolution() != resolution_mode_){
+          RCLCPP_WARN(rclcpp::get_logger(node_name), "The resolution_mode setted is different that resolution mode configured in the driver \n    - For security driver will move at 1RPM");
+          resolution_mode_ = ResolutionMode::ONE_RPM;
+        }
         movement_lock_timer_->reset();
         RCLCPP_INFO(rclcpp::get_logger(node_name), "resolution_mode setted as: %s", resolution_mode_flag ? "0.1RPM" : "1RPM");
       }
@@ -264,7 +268,7 @@ private:
     }
 
     // Debug message
-    RCLCPP_DEBUG(get_logger(), "[WARN_MON] enc(L=%ld R=%ld) rpm(L=%.1f R=%.1f) I(L=%.2fA R=%.2fA) T(L=%.1fC R=%.1fC)",
+    RCLCPP_INFO(get_logger(), "[WARN_MON] enc(L=%ld R=%ld) rpm(L=%.1f R=%.1f) I(L=%.2fA R=%.2fA) T(L=%.1fC R=%.1fC)",
       static_cast<long>(count_left), static_cast<long>(count_right),
       static_cast<double>(rpm_left), static_cast<double>(rpm_right),
       static_cast<double>(current_left), static_cast<double>(current_right),
