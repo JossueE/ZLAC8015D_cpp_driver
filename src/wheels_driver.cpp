@@ -119,6 +119,7 @@ public:
     // Check Resolution Setted
     if (motors_.get_speed_resolution() != resolution_mode_){
       RCLCPP_WARN(rclcpp::get_logger(node_name), "The resolution_mode setted is different that resolution mode configured in the driver \n    - For security driver will move at 1RPM");
+      // RCLCPP_INFO(rclcpp::get_logger(node_name), "resolution_mode setted as: %s", resolution_mode_flag ? "0.1RPM" : "1RPM");
       resolution_mode_ = ResolutionMode::ONE_RPM;
     }
 

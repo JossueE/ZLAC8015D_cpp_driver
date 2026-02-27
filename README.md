@@ -47,8 +47,11 @@ git clone https://github.com/JossueE/ZLAC8015D_cpp_driver
 
 **Compile the test application:**
 ```bash
-cd ~/colcon_ws
-g++ -std=c++17 src/zlac8015d_driver/zlac8015d_driver.cpp src/zlac8015d_driver/test_driver.cpp -o test_driver -lmodbus
+cd ~/colcon_ws/src/zlac8015d_driver2_cpp
+g++ -std=c++17 -Iinclude \
+  src/zlac8015d_driver/zlac8015d_driver.cpp \
+  src/zlac8015d_driver/test_driver.cpp \
+  -o test_driver -lmodbus
 ```
 
 **Run tests:**
@@ -89,6 +92,29 @@ ros2 topic echo /wheel/right_data
 
 ---
 
+### First-time setup: Speed resolution (0.1 RPM vs 1 RPM)
+
+> [!WARNING]
+> Some ZLAC8015D units **do not support changing speed resolution**.
+> Perform this procedure with the robot **lifted off the ground** or with a safe test stand.
+> The controller **may move** if the motors are enabled.
+
+**How to check support (safe procedure):**
+1. Ensure motors are **disabled** (use `emergency_stop()` or your hardware E-Stop).
+2. Run the standalone test:
+   ```bash
+   ./test_driver /dev/ttyUSB0
+   #or 
+   ros2 run zlac8015d_driver2_cpp test_driver /dev/ttyUSB0
+   ```
+   The test will attempt to configure 0.1 RPM resolution.
+3. **Power-cycle** the driver (turn OFF, wait ~10s, turn ON).
+4. Run the test again:
+    - If the resolution warning disappears → your unit supports **0.1 RPM.**
+    - If the warning persists → your unit only supports **1 RPM** (keep `resolution_mode:=false`).  
+    > If you switch between 0.1 and 1 RPM, command scaling changes by **×10**.
+
+
 ## Configuration
 
 Edit ROS2 parameters in your launch file or via command line:
@@ -103,5 +129,34 @@ ros2 run zlac8015d_driver2_cpp wheels_driver /dev/ttyUSB0 \
 
 # You can set more values, pleas check the node as reference
 ```
+---
 
+## Driver Notes
+
+> [!IMPORTANT]
+> Pay Attention to the next recommendations and utilities of the driver
+> Check the Heather File to get more information of an specific function
+
+### Recommended startup sequence
+1. Connect to `/dev/ttyUSBX`
+2. Switch controller to **the desired mode** (**Velocity** recommended for `/cmd_vel_safe`)
+3. Apply accel/decel time and gains
+4. Validate speed resolution (and force safe mode if mismatch)
+5. Enable command topics (`/cmd_vel_safe`)
+
+### Safety
+- Always send `0 RPM` before shutting down the node.
+- On shutdown, the node attempts to stop the motors.
+- Use an external E-Stop for real hardware testing.
+
+## Stops Message (también)
+- `emergency_stop()` — Immediately locks the wheels (no motion allowed).
+- `disable_stop()` — Releases the lock so the wheels can move again.
+- `enable_motor()` — Required after stopping the motors with either stop function.
+
+### Common issues
+- **Weird RPM readings (too high/too low):** resolution mismatch (0.1 vs 1 RPM).
+
+
+---
 
