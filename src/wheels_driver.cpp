@@ -8,8 +8,6 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "zlac8015d_driver.h"
 
-static constexpr double PI{3.14159265358979323846};
-
 using namespace std::chrono_literals;
 
 std::string node_name = "wheels_driver";
@@ -457,8 +455,8 @@ private:
     const double w_l = (vx - (wz * wheels_separation_ / 2.0)) / wheels_radius_;
     const double w_r = (vx + (wz * wheels_separation_ / 2.0)) / wheels_radius_;
 
-    double rpm_l = w_l * 60.0 / (2.0 * PI);
-    double rpm_r = w_r * 60.0 / (2.0 * PI);
+    double rpm_l = w_l * 60.0 / (2.0 * M_PI);
+    double rpm_r = w_r * 60.0 / (2.0 * M_PI);
 
     if (wheelL_is_backward_) rpm_l = -rpm_l;
     if (wheelR_is_backward_) rpm_r = -rpm_r;
