@@ -133,8 +133,8 @@ public:
 
   ~ZlacNode() override {
     try {
-      motors_.set_decel_time(3000);
-      motors_.set_accel_time(3000);
+      motors_.set_decel_time(2000);
+      motors_.set_accel_time(2000);
       motors_.emergency_stop();
     } catch (...) {
       RCLCPP_ERROR(rclcpp::get_logger(node_name), "Error launching emergency stop when the node was destructed");
@@ -285,7 +285,7 @@ private:
       RCLCPP_WARN(rclcpp::get_logger(node_name),
         "[WARN_MON] High RPM: L=%.1f R=%.1f \n", (double)rpm_left, (double)rpm_right);
       RCLCPP_WARN(rclcpp::get_logger(node_name), 
-        "[WARN_MON] High RPM: Max value for Position Mode is 1000 RPM, for Velocity 3000 RPM");
+        "[WARN_MON] High RPM: Max value for Position Mode is 1000 RPM, for Velocity 2000 RPM");
     }
 
     if (std::abs((double)current_left) > 25000.0 || std::abs((double)current_right) > 25000.0) { // Max value = 30A
@@ -340,8 +340,8 @@ private:
     {
       RCLCPP_FATAL(rclcpp::get_logger(node_name), "Critical error detected in ZLAC8015D driver. Emergency stop + shutdown.");
       motors_.emergency_stop();
-      motors_.set_decel_time(3000);
-      motors_.set_accel_time(3000);
+      motors_.set_decel_time(2000);
+      motors_.set_accel_time(2000);
       rclcpp::shutdown();
     }
 
@@ -357,8 +357,8 @@ private:
 
       if (error_count >= 5) {
         RCLCPP_ERROR(rclcpp::get_logger(node_name),"ZLAC error detected %d times, shutting down to prevent damage.", error_count);
-        motors_.set_decel_time(3000);
-        motors_.set_accel_time(3000);
+        motors_.set_decel_time(2000);
+        motors_.set_accel_time(2000);
         motors_.emergency_stop(); // The wheels are going to be locked
         rclcpp::shutdown();
       }
@@ -372,8 +372,8 @@ private:
       auto[rpm_left, rpm_right] = motors_.get_rpm();
       if (rpm_left > 2500 || rpm_right > 2500){
         RCLCPP_WARN(rclcpp::get_logger(node_name),"Too high speed detected in ZLAC8015D driver. RPM Left:  %.1f, RPM Right:  %.1f", rpm_left, rpm_right);
-        motors_.set_decel_time(3000);
-        motors_.set_accel_time(3000);
+        motors_.set_decel_time(2000);
+        motors_.set_accel_time(2000);
         motors_.set_sync_rpm(1000.0, 1000.0, resolution_mode_); // Position 1000 RPM // Velocity 3000 RPM
         RCLCPP_WARN(rclcpp::get_logger(node_name), "For security the speed is set to 100 RPM, Acceleration and deceleration set to 16 seconds");
       }
