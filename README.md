@@ -27,8 +27,6 @@ This package provides a C++ driver and ROS2 node for controlling the ZLAC8015D d
 sudo apt-get update
 # Needed to use the driver
 sudo apt-get install -y libmodbus-dev 
-# Needed to use with ROS2
-sudo apt-get install ros2 colcon-common-extensions
 ```
 
 ### Clone
