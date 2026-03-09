@@ -303,7 +303,8 @@ private:
       rclcpp::shutdown();
     }
     else if (pubs == 0){
-      RCLCPP_WARN(rclcpp::get_logger(node_name), "No publishers on cmd_vel_safe (%zu). Stopping robot and locking wheels for security.", pubs);
+      RCLCPP_WARN(rclcpp::get_logger(node_name), "No publi}shers on cmd_vel_safe (%zu). Stopping robot and locking wheels for security.", pubs);
+      movement_lock_timer_->cancel();
       motors_.set_sync_rpm(0,0, resolution_mode_);
     }
   }
